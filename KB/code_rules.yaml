@@ -1,6 +1,5 @@
 # code_rules.yaml
 # High Performance Computing Code Conversion Rules
-# Last Updated: 2024-03-15
 
 C:  
   memory_management:
@@ -876,6 +875,99 @@ JAX:
         a = jnp.array([1, 2, 3], dtype=jnp.float32)
       fix: |
         Always specify the dtype when creating arrays if numerical precision is a concern.
+
+    - rule: "JAX-SCAN-001"
+      desc: "Use jax.lax.scan for loops with sequential dependencies"
+      error_pattern: "vectorized assignment for dependent iterations"
+      example: |
+        # Bad
+        def cumulative_sum(x):
+            # Incorrectly using vectorized operations for sequential dependency
+            result = x.copy()
+            result[1:] = result[:-1] + x[1:]
+            return result
+        
+        # Good
+        def cumulative_sum(x):
+            def body(carry, elem):
+                new_carry = carry + elem
+                return new_carry, new_carry
+            _, result = jax.lax.scan(body, 0, x)
+            return result
+      fix: |
+        When iterations depend on previous results, use jax.lax.scan to correctly propagate state instead of relying on vectorized slicing.
+
+    - rule: "JAX-INPLACE-001"
+      desc: "Avoid in-place updates in JAX; use functional updates instead"
+      error_pattern: ".*\\[.*\\]\\s*=\\s*.*"
+      example: |
+        # Bad
+        def update_array(x):
+            x[0] = 1
+            return x
+        
+        # Good
+        def update_array(x):
+            return x.at[0].set(1)
+      fix: |
+        Use the immutable update operations provided by JAX, such as x.at[index].set(value), to update arrays without in-place mutation.
+
+  formatting:
+    - rule: "JAX-FORMAT-001"
+      desc: "Follow PEP8 style guidelines for JAX code"
+      error_pattern: ""
+      example: |
+        # Bad: Inconsistent indentation and spacing
+        def f(x):
+         return jnp.sin(x)
+        
+        # Good: Proper indentation and spacing
+        def f(x):
+            return jnp.sin(x)
+      fix: |
+        Follow PEP8 style guidelines:
+        - Use 4 spaces per indentation level.
+        - Ensure proper spacing around operators.
+        - Limit line length to 79 or 99 characters.
+    - rule: "JAX-FORMAT-002"
+      desc: "Use clear and consistent naming conventions for functions and variables"
+      error_pattern: ""
+      example: |
+        # Bad
+        def f(x): return x * 2
+        
+        # Good
+        def double(x):
+            return x * 2
+      fix: |
+        Use descriptive names for functions and variables; avoid ambiguous or single-letter names except for trivial cases.
+    - rule: "JAX-FORMAT-003"
+      desc: "Include docstrings for all public functions"
+      error_pattern: ""
+      example: |
+        # Bad
+        def f(x):
+            return x + 1
+        
+        # Good
+        def increment(x):
+            \"\"\"Return the input incremented by one.\"\"\"
+            return x + 1
+      fix: |
+        Provide a docstring for every public function, clearly explaining its purpose, parameters, and return value.
+    - rule: "JAX-FORMAT-004"
+      desc: "Consistently import jax.numpy as jnp"
+      error_pattern: ""
+      example: |
+        # Bad
+        import jax.numpy
+        a = jax.numpy.array([1, 2, 3])
+        
+        # Good
+        import jax.numpy as jnp
+        a = jnp.array([1, 2, 3])
+      fix: |
+        Always use 'import jax.numpy as jnp' to maintain consistency and simplify code.
 
 analysis_rules:
   - "Always report source/target language versions (e.g., C++17 vs C++23)"
