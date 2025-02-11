@@ -1,0 +1,884 @@
+# code_rules.yaml
+# High Performance Computing Code Conversion Rules
+# Last Updated: 2024-03-15
+
+C:  
+  memory_management:
+    - rule: "C-MEM-001"
+      desc: "Always pair malloc/calloc with free"
+      error_pattern: "malloc|calloc(?!.*free\\()"
+      example: |
+        // Bad
+        int* arr = malloc(100 * sizeof(int));
+        
+        // Good
+        int* arr = malloc(100 * sizeof(int));
+        /* ... */
+        free(arr);
+      fix: |
+        1. Add a corresponding free for each malloc/calloc call.
+        2. Check for resource release at function exit points.
+        3. Use tools (e.g., Valgrind) to detect memory leaks.
+        4. Key example:
+           - Before: int* p = malloc(size);
+           - After: 
+             int* p = malloc(size);
+             if (!p) { /* Error handling */ }
+             /* ... */
+             free(p);
+    - rule: "C-MEM-002"
+      desc: "Check for NULL pointers after allocation"
+      error_pattern: "(malloc|calloc)\\s*\\(.*\\)(?!.*==\\s*NULL)"
+      example: |
+        // Bad
+        int* arr = malloc(N * sizeof(int));
+        
+        // Good
+        int* arr = malloc(N * sizeof(int));
+        if (arr == NULL) { /* handle error */ }
+      fix: |
+        Immediately add a NULL pointer check after the allocation:
+        void* ptr = malloc(size);
+        if (ptr == NULL) {
+           // Add error handling logic
+           return ERROR_CODE;
+        }
+  
+  arrays:
+    - rule: "C-ARR-001"
+      desc: "Prevent array index out-of-bounds"
+      error_pattern: "\\[\\s*\\d+\\s*\\]"
+      example: |
+        // Bad
+        int arr[10];
+        arr[10] = 5;
+        
+        // Good
+        arr[9] = 5;
+      fix: |
+        1. Add range checking logic:
+           if (index >= 0 && index < ARRAY_SIZE) {
+               arr[index] = value;
+           }
+        2. Use static analysis tools to check array accesses.
+  
+  error_handling:
+    - rule: "C-ERR-001"
+      desc: "Check return values of system calls"
+      error_pattern: "(fopen|scanf|printf)\\s*\\(.*\\)(?!.*==\\s*NULL)"
+      example: |
+        // Bad
+        FILE* f = fopen("data.txt", "r");
+        
+        // Good
+        FILE* f = fopen("data.txt", "r");
+        if (f == NULL) { perror("Error"); exit(EXIT_FAILURE); }
+      fix: |
+        Add error checking for all function calls that might fail:
+        FILE* fp = fopen(...);
+        if (fp == NULL) {
+           // Add appropriate error handling.
+        }
+    - rule: "C-ERR-002"
+      desc: "Check errno after system calls"
+      error_pattern: ""
+      example: |
+        // Bad
+        int ret = some_syscall(...);
+        // No check on errno
+        // Good
+        int ret = some_syscall(...);
+        if (ret < 0) {
+           perror("some_syscall failed");
+        }
+      fix: |
+        Always check the return value of system calls and examine errno for error diagnosis.
+  
+  strings_and_buffers:
+    - rule: "C-STR-001"
+      desc: "Avoid use of unsafe string functions"
+      error_pattern: "(gets\\s*\\(|strcpy\\s*\\(|strcat\\s*\\(|sprintf\\s*\\()"
+      example: |
+        // Bad
+        char buffer[10];
+        strcpy(buffer, input);
+        
+        // Good
+        char buffer[10];
+        strncpy(buffer, input, sizeof(buffer)-1);
+        buffer[sizeof(buffer)-1] = '\\0';
+      fix: |
+        Replace unsafe functions like gets, strcpy, strcat, sprintf with their safer alternatives such as fgets, strncpy, strncat, snprintf.
+  
+  const_correctness:
+    - rule: "C-CONST-001"
+      desc: "Use const qualifiers where appropriate"
+      error_pattern: "(char\\s*\\*\\s*[^;]*;)"
+      example: |
+        // Bad
+        void func(char* str) { /* ... */ }
+        
+        // Good
+        void func(const char* str) { /* ... */ }
+      fix: |
+        Add const qualifiers to variables and function parameters that should not be modified.
+  
+  buffer_overflow:
+    - rule: "C-BUF-001"
+      desc: "Ensure buffers are not overrun"
+      error_pattern: ""
+      example: |
+        // Bad
+        char buf[10];
+        gets(buf);
+        
+        // Good
+        char buf[10];
+        fgets(buf, sizeof(buf), stdin);
+      fix: |
+        Use functions that perform bounds checking (e.g., fgets, snprintf) and always validate the length of data being written to buffers.
+  
+  pointer_validation:
+    - rule: "C-PTR-001"
+      desc: "Always validate pointers before dereferencing"
+      error_pattern: ""
+      example: |
+        // Bad
+        int* ptr = malloc(sizeof(int));
+        *ptr = 5;
+        
+        // Good
+        int* ptr = malloc(sizeof(int));
+        if (ptr != NULL) {
+           *ptr = 5;
+        }
+      fix: |
+        Always check if a pointer is NULL after allocation before dereferencing.
+  
+  dynamic_memory_realloc:
+    - rule: "C-MEM-003"
+      desc: "Safely use realloc and handle NULL returns"
+      error_pattern: "realloc\\s*\\(.*\\)"
+      example: |
+        // Bad
+        ptr = realloc(ptr, new_size);
+        
+        // Good
+        void* temp = realloc(ptr, new_size);
+        if (temp == NULL) {
+           // handle error, free original memory if necessary
+        } else {
+           ptr = temp;
+        }
+      fix: |
+        Use a temporary pointer when calling realloc to safely handle allocation failures.
+  
+  macro_usage:
+    - rule: "C-MAC-001"
+      desc: "Avoid excessive use of macros"
+      error_pattern: "^#define\\s+\\w+"
+      example: |
+        // Bad
+        #define MAX_SIZE 100
+        
+        // Good
+        const int MAX_SIZE = 100;
+      fix: |
+        Prefer constant variables (const) or enums over preprocessor macros for constants.
+  
+  type_consistency:
+    - rule: "C-TYPE-001"
+      desc: "Ensure consistent use of data types in arithmetic operations"
+      error_pattern: "([0-9]+\\.[0-9]+)|(float)|(double)"
+      example: |
+        // Bad: Mixing float and double without explicit casts
+        float a = 1.0;
+        double b = 2.0;
+        double c = a + b;
+        
+        // Good: Use explicit casts or consistent types
+        float a = 1.0f;
+        float b = 2.0f;
+        float c = a + b;
+      fix: |
+        Use consistent data types for arithmetic operations or use explicit casts to avoid precision loss or unexpected behavior.
+  
+  pointer_arithmetic:
+    - rule: "C-PTR-002"
+      desc: "Validate pointer arithmetic and memory alignment"
+      error_pattern: ""
+      example: |
+        // Bad: Potential misaligned pointer arithmetic
+        char* ptr = malloc(100);
+        int* iptr = (int*)ptr;  // may lead to alignment issues
+        *iptr = 10;
+        
+        // Good: Ensure proper alignment or use memcpy
+        char* ptr = malloc(100);
+        if (((uintptr_t)ptr % alignof(int)) == 0) {
+            int* iptr = (int*)ptr;
+            *iptr = 10;
+        } else {
+            // use memcpy or aligned allocation
+        }
+      fix: |
+        Validate pointer arithmetic operations and ensure memory alignment for proper access.
+
+C++:
+  resource_management:
+    - rule: "CPP-RES-001"
+      desc: "Use RAII for resource management"
+      error_pattern: "new\\s+\\w+(?!.*delete\\s+\\w+)"
+      example: |
+        // Bad
+        int* arr = new int[100];
+        
+        // Good
+        std::unique_ptr<int[]> arr(new int[100]);
+      fix: |
+        1. Replace raw pointers with smart pointers:
+           std::unique_ptr<T> ptr(new T);
+        2. Use container classes instead of arrays:
+           std::vector<int> arr(100);
+    - rule: "CPP-RES-002"
+      desc: "Prefer std::make_unique and std::make_shared"
+      error_pattern: "new\\s+std::(unique_ptr|shared_ptr)"
+      example: |
+        // Bad
+        std::unique_ptr<MyClass> obj(new MyClass());
+        
+        // Good
+        auto obj = std::make_unique<MyClass>();
+      fix: |
+        Replace explicit new with std::make_unique or std::make_shared for exception safety and clarity.
+
+  concurrency:
+    - rule: "CPP-CON-001"
+      desc: "Use atomic operations for shared variables"
+      error_pattern: "(volatile\\s+\\w+|shared\\s+variable)"
+      example: |
+        // Bad
+        volatile int counter = 0;
+        
+        // Good
+        std::atomic<int> counter(0);
+      fix: |
+        1. Replace 'volatile' with std::atomic.
+        2. Ensure all accesses use atomic operations:
+           counter.load(std::memory_order_relaxed);
+           counter.store(new_value, std::memory_order_release);
+    - rule: "CPP-THREAD-001"
+      desc: "Use std::mutex and std::lock_guard for thread safety"
+      error_pattern: "(pthread_mutex_lock|lock\\s*\\()"
+      example: |
+        // Bad
+        // Using raw pthread mutexes without RAII
+        pthread_mutex_lock(&mutex);
+        // critical section
+        pthread_mutex_unlock(&mutex);
+        
+        // Good
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          // critical section
+        }
+      fix: |
+        Use std::mutex combined with std::lock_guard or std::unique_lock to manage locks automatically and avoid deadlocks.
+
+  templates:
+    - rule: "CPP-TMP-001"
+      desc: "Implement templates in header files"
+      error_pattern: "template\\s+<.*>\\s*\\w+\\s*::\\w+"
+      example: |
+        // Bad: Template implementation in .cpp
+        template<typename T>
+        void MyClass<T>::func() {}
+        
+        // Good: Keep in .hpp
+      fix: |
+        1. Move template definitions to header files.
+        2. Use explicit instantiation (if separation is necessary):
+           // header.hpp
+           template<typename T> void func();
+           // source.cpp
+           template void func<int>();
+
+  error_handling:
+    - rule: "CPP-ERR-001"
+      desc: "Ensure exception safety with RAII and proper catch blocks"
+      error_pattern: "try\\s*\\{.*\\}\\s*catch\\s*\\(.*\\)"
+      example: |
+        // Bad
+        void func() {
+          MyClass* obj = new MyClass();
+          // potential exception thrown, memory leak occurs
+        }
+        
+        // Good
+        void func() {
+          auto obj = std::make_unique<MyClass>();
+          // exceptions handled, no leak
+        }
+      fix: |
+        Use RAII (e.g., smart pointers) to manage resources and catch exceptions appropriately.
+
+  style:
+    - rule: "CPP-STYLE-001"
+      desc: "Adhere to consistent naming conventions and code formatting"
+      error_pattern: ""
+      example: |
+        // Bad: Inconsistent naming
+        int myVar;
+        int MyVar;
+        
+        // Good: Consistent naming (e.g., snake_case or camelCase)
+        int my_var;
+        int another_var;
+      fix: |
+        Follow a standard style guide such as the Google C++ Style Guide or C++ Core Guidelines.
+
+  modern_cpp:
+    - rule: "CPP-MODERN-001"
+      desc: "Prefer auto for type inference when appropriate"
+      error_pattern: "\\b[A-Z][a-zA-Z0-9_]*\\s+[a-zA-Z0-9_]+\\s*=\\s*[^;]+;"
+      example: |
+        // Bad
+        std::vector<int> v = get_vector();
+        
+        // Good
+        auto v = get_vector();
+      fix: |
+        Use auto for variable declarations when the type is obvious from the right-hand side to improve code clarity.
+    - rule: "CPP-MODERN-002"
+      desc: "Use nullptr instead of NULL or 0 for pointers"
+      error_pattern: "\\bNULL\\b|\\b0(?=\\s*[;,])"
+      example: |
+        // Bad
+        int* ptr = NULL;
+        
+        // Good
+        int* ptr = nullptr;
+      fix: |
+        Replace all occurrences of NULL or 0 (used as a null pointer constant) with nullptr for pointer assignments.
+
+FORTRAN:
+  declarations:
+    - rule: "F-DEC-001" 
+      desc: "Always use IMPLICIT NONE"
+      error_pattern: "^\\s*PROGRAM\\s+\\w+(?!.*IMPLICIT\\s+NONE)"
+      example: |
+        ! Bad
+        PROGRAM TEST
+          I = 10
+        
+        ! Good
+        PROGRAM TEST
+          IMPLICIT NONE
+          INTEGER :: I
+      fix: |
+        Insert at the beginning of the program unit:
+        PROGRAM name
+        IMPLICIT NONE
+        ! All variables must be declared explicitly.
+    - rule: "F-DEC-002"
+      desc: "Prefer MODULES over COMMON blocks"
+      error_pattern: "COMMON\\s*/"
+      example: |
+        ! Bad
+        COMMON /BLOCK/ A, B, C
+        
+        ! Good
+        MODULE MyModule
+          REAL :: A, B, C
+        END MODULE MyModule
+      fix: |
+        Refactor COMMON blocks to modules and use explicit interfaces.
+    - rule: "F-DEC-003"
+      desc: "Always initialize variables"
+      error_pattern: "^(INTEGER|REAL|DOUBLE PRECISION|LOGICAL)\\s*::\\s*\\w+(?!\\s*=)"
+      example: |
+        ! Bad
+        INTEGER :: i
+        
+        ! Good
+        INTEGER :: i = 0
+      fix: |
+        Always initialize variables when declaring them to avoid undefined behavior.
+    - rule: "F-DEC-004"
+      desc: "Minimize use of GOTO statements"
+      error_pattern: "GOTO\\s+\\w+"
+      example: |
+        ! Bad
+        IF (condition) GOTO 100
+        ...
+        100 CONTINUE
+        
+        ! Good
+        IF (condition) THEN
+          ! structured block
+        END IF
+      fix: |
+        Replace GOTO statements with structured control constructs such as IF/ELSE and DO loops.
+    - rule: "F-DEC-005"
+      desc: "Use explicit interfaces for external procedures"
+      error_pattern: "EXTERNAL\\s+\\w+"
+      example: |
+        ! Bad
+        EXTERNAL foo
+        CALL foo(x)
+        
+        ! Good
+        INTERFACE
+          SUBROUTINE foo(x)
+            INTEGER :: x
+          END SUBROUTINE foo
+        END INTERFACE
+        CALL foo(x)
+      fix: |
+        Provide explicit interfaces either by using modules or INTERFACE blocks for all external procedures.
+  
+  memory:
+    - rule: "F-MEM-001"
+      desc: "Properly allocate/deallocate arrays"
+      error_pattern: "ALLOCATABLE\\s+::\\s*\\w+(?!.*ALLOCATE|DEALLOCATE)"
+      example: |
+        ! Bad
+        REAL, ALLOCATABLE :: A(:)
+        
+        ! Good
+        ALLOCATE(A(100), STAT=ierr)
+        IF (ierr /= 0) STOP "Error allocating"
+        DEALLOCATE(A)
+      fix: |
+        1. Use ALLOCATE and DEALLOCATE in pairs.
+        2. Check the STAT parameter for error handling.
+  
+  array_operations:
+    - rule: "F-ARR-001"
+      desc: "Prefer intrinsic array operations over explicit loops"
+      error_pattern: "DO\\s+\\w+\\s*=\\s*\\d+\\s*,\\s*\\d+"
+      example: |
+        ! Bad
+        DO i = 1, N
+          A(i) = B(i) + C(i)
+        END DO
+        
+        ! Good
+        A = B + C
+      fix: |
+        Refactor loop-based array operations into vectorized intrinsic operations.
+
+CUDA:
+  host_memory:
+    - rule: "CUDA-HMEM-001"
+      desc: "Use pinned memory for host allocations when using DMA"
+      error_pattern: "malloc\\s*\\(.*\\)"
+      example: |
+        // Bad
+        float* h_data = malloc(size);
+        
+        // Good
+        float* h_data;
+        cudaMallocHost(&h_data, size);
+      fix_guidance: "Replace all host-side malloc with cudaMallocHost and use cudaFreeHost in conjunction with it"
+
+  memory:
+    - rule: "CUDA-MEM-001"
+      desc: "Use cudaMalloc/cudaFree for device memory"
+      error_pattern: "malloc\\s*\\(.*\\)(?!.*cuda)"
+      example: |
+        // Bad
+        int* d_arr = malloc(N * sizeof(int));
+        
+        // Good
+        int* d_arr;
+        cudaMalloc(&d_arr, N * sizeof(int));
+        cudaFree(d_arr);
+      fix_guidance: "Replace device-side malloc with cudaMalloc and ensure corresponding cudaFree calls"
+
+  optimization:
+    - rule: "CUDA-OPT-001"
+      desc: "Use coalesced memory access patterns"
+      error_pattern: "\\[\\s*(threadIdx\\.x\\s*\\*\\s*\\d+\\s*\\+\\s*threadIdx\\.y)\\s*\\]"
+      example: |
+        // Bad
+        __global__ void copy(int** data) { ... }
+        
+        // Good
+        __global__ void copy(int* data) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            data[idx] = ...;
+        }
+      fix_guidance: "Restructure data access so that consecutive threads access consecutive memory locations"
+
+  memory_order:
+    - rule: "CUDA-MEM-002"
+      desc: "Host memory must persist during device operations"
+      error_pattern: "(cudaMemcpy\\s*\\(.*HostToDevice\\))(?!.*cudaMallocHost)"
+      example: |
+        // Bad
+        malloc → cudaMemcpy H2D → free → kernel launch
+        
+        // Good
+        cudaMallocHost → cudaMemcpy H2D → kernel → cudaFreeHost
+      fix_guidance: "Ensure host memory used for DMA is allocated with cudaMallocHost and remains valid during device operations"
+
+  memory_access:
+    - rule: "CUDA-MEM-003"
+      desc: "Avoid unaligned memory access in kernels"
+      error_pattern: 
+        - "\\[.*threadIdx\\.x\\s*[+/-].*\\]"  
+        - "float[2-8]\\s*\\*\\s*\\w+"
+      example: |
+        // Bad: Unaligned access
+        __global__ void copy(float4* data) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            float val = data[idx].x;  // Should use .w for aligned access
+        }
+
+        // Good: Aligned access
+        __global__ void copy(float4* data) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            float val = data[idx].w;
+        }
+      fix_guidance: "Align memory accesses by adjusting data structures or using proper vectorized types"
+
+  synchronization:
+    - rule: "CUDA-SYNC-001"
+      desc: "Avoid unnecessary __syncthreads() calls"
+      error_pattern: "__syncthreads\\s*\\(\\s*\\)"
+      example: |
+        // Bad: Excessive synchronization inside a loop
+        __global__ void kernel(...) {
+            for (int i = 0; i < N; i++) {
+                // perform operations
+                __syncthreads();
+            }
+        }
+        
+        // Good: Remove redundant synchronization
+        __global__ void kernel(...) {
+            for (int i = 0; i < N; i++) {
+                // perform operations without unnecessary __syncthreads()
+            }
+        }
+      fix_guidance: "Review and remove __syncthreads() calls that are not required for data consistency"
+
+  shared_memory:
+    - rule: "CUDA-SHARED-001"
+      desc: "Avoid shared memory bank conflicts"
+      error_pattern: "(__shared__\\s+\\w+\\s+\\w+\\[.*\\])"
+      example: |
+        // Bad: Shared memory access causing bank conflicts
+        __global__ void kernel(float* in, float* out) {
+            __shared__ float s_data[32];
+            int tid = threadIdx.x;
+            s_data[tid] = in[tid + blockIdx.x * blockDim.x];
+            __syncthreads();
+            out[tid + blockIdx.x * blockDim.x] = s_data[tid];
+        }
+        
+        // Good: Add padding to avoid bank conflicts
+        __global__ void kernel(float* in, float* out) {
+            __shared__ float s_data[33];  // extra element for padding
+            int tid = threadIdx.x;
+            s_data[tid] = in[tid + blockIdx.x * blockDim.x];
+            __syncthreads();
+            out[tid + blockIdx.x * blockDim.x] = s_data[tid];
+        }
+      fix_guidance: "Reorganize shared memory (e.g., add padding) or adjust access patterns to minimize bank conflicts"
+
+  grid_configuration:
+    - rule: "CUDA-DIM-001"
+      desc: "Configure grid and block dimensions appropriately"
+      error_pattern: "<<<.*>>>"
+      example: |
+        // Bad: Suboptimal grid configuration
+        kernel<<<1, 32>>>(...);
+        
+        // Good: Adjust grid and block dimensions for better occupancy
+        kernel<<<gridDim, blockDim>>>(...);
+      fix_guidance: "Analyze the problem size and adjust grid/block dimensions to maximize GPU occupancy and performance"
+
+  data_transfer:
+    - rule: "CUDA-MEMCPY-001"
+      desc: "Use asynchronous memory copy when possible"
+      error_pattern: "cudaMemcpy\\s*\\("
+      example: |
+        // Bad: Synchronous memory copy
+        cudaMemcpy(d_data, h_data, size, cudaMemcpyHostToDevice);
+        
+        // Good: Asynchronous memory copy with streams
+        cudaMemcpyAsync(d_data, h_data, size, cudaMemcpyHostToDevice, stream);
+      fix_guidance: "Replace synchronous cudaMemcpy with cudaMemcpyAsync and use CUDA streams to overlap data transfer with computation"
+
+OpenMP:
+  correctness:
+    - rule: "OMP-COR-001"
+      desc: "Specify private/shared variables explicitly"
+      error_pattern: "#pragma\\s+omp\\s+parallel(?!.*private|shared)"
+      example: |
+        // Bad
+        #pragma omp parallel
+        { int t = ... }
+        
+        // Good
+        #pragma omp parallel private(t)
+        { int t = ... }
+      fix: |
+        1. Explicitly declare the data-sharing attributes of variables.
+        2. Use default(none) to enforce explicit declaration:
+           #pragma omp parallel default(none) shared(a) private(b)
+  reductions:
+    - rule: "OMP-RACE-001"
+      desc: "Ensure proper reduction clause usage in parallel loops"
+      error_pattern: "for\\s*\\(.*\\)\\s*{[^}]*\\+=[^}]*}"
+      example: |
+        // Bad: Potential race on sum
+        int sum = 0;
+        #pragma omp parallel for
+        for (int i = 0; i < N; i++) {
+            sum += A[i];
+        }
+        
+        // Good: Reduction ensures thread-safe accumulation
+        int sum = 0;
+        #pragma omp parallel for reduction(+:sum)
+        for (int i = 0; i < N; i++) {
+            sum += A[i];
+        }
+      fix: |
+        Use the reduction clause to combine thread-local results safely:
+        #pragma omp parallel for reduction(+:sum)
+  scheduling:
+    - rule: "OMP-SCHED-001"
+      desc: "Specify scheduling strategy explicitly for parallel loops"
+      error_pattern: "#pragma\\s+omp\\s+parallel\\s+for(?!.*schedule)"
+      example: |
+        // Bad: Implicit scheduling may lead to load imbalance
+        #pragma omp parallel for
+        for (int i = 0; i < N; i++) { ... }
+        
+        // Good: Explicit scheduling improves load balance
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int i = 0; i < N; i++) { ... }
+      fix: |
+        Add an appropriate schedule clause (e.g., schedule(static/dynamic/guided, chunk_size)) to parallel loops.
+  nested_parallelism:
+    - rule: "OMP-NEST-001"
+      desc: "Avoid excessive nested parallelism"
+      error_pattern: "#pragma\\s+omp\\s+parallel(?!.*if)"
+      example: |
+        // Bad: Uncontrolled nested parallel regions
+        #pragma omp parallel
+        {
+            #pragma omp parallel
+            { ... }
+        }
+        
+        // Good: Disable nested parallelism or control it via conditions
+        omp_set_nested(0);
+        #pragma omp parallel
+        { ... }
+      fix: |
+        Avoid or disable nested parallelism unless necessary. Use omp_set_nested(0) to disable nested parallel regions.
+  synchronization:
+    - rule: "OMP-SYNC-001"
+      desc: "Use synchronization constructs appropriately"
+      error_pattern: "#pragma\\s+omp\\s+parallel(?!.*(barrier|critical|atomic))"
+      example: |
+        // Bad: Missing necessary synchronization leading to race conditions
+        #pragma omp parallel
+        {
+          // critical section missing
+          shared_var = compute(shared_var);
+        }
+        
+        // Good: Using critical to protect shared data
+        #pragma omp parallel
+        {
+          #pragma omp critical
+          {
+            shared_var = compute(shared_var);
+          }
+        }
+      fix: |
+        Analyze shared data accesses and add appropriate synchronization constructs (barrier, critical, atomic) to prevent data races.
+
+JAX:
+  jit:
+    - rule: "JAX-JIT-001" 
+      desc: "Keep jitted functions stateless"
+      error_pattern: "@jit.*global\\s+\\w+"
+      example: |
+        # Bad
+        @jit x = [global_var]
+        
+        # Good 
+        @jit def f(x): return x+1
+      fix: |
+        Refactor the function to be pure:
+        1. Remove dependencies on global variables  
+        2. Pass state as explicit parameters
+        3. Use jax.pure_callback for necessary external state
+
+  best_practices:
+    - rule: "JAX-RANDOM-001"
+      desc: "Always use explicit PRNG keys for randomness"
+      error_pattern: "jax\\.random\\.(?!.*\\()"
+      example: |
+        # Bad
+        @jax.jit
+        def f(x):
+            return jax.random.normal(x.shape)
+        
+        # Good
+        def f(x, key):
+            return jax.random.normal(key, x.shape)
+      fix: |
+        Always pass an explicit PRNG key to jax.random functions to ensure reproducibility and avoid implicit random state.
+
+    - rule: "JAX-LOOP-001"
+      desc: "Avoid Python loops in jitted functions"
+      error_pattern: "for\\s+\\w+\\s+in\\s+range\\("
+      example: |
+        # Bad
+        @jax.jit
+        def f(x):
+            for i in range(len(x)):
+                x[i] = x[i] * 2
+            return x
+        
+        # Good
+        @jax.jit
+        def f(x):
+            return x * 2
+      fix: |
+        Replace Python loops with vectorized operations or use jax.lax.fori_loop or jax.vmap for iterations.
+
+    - rule: "JAX-VECTORIZE-001"
+      desc: "Prefer vectorized operations over explicit loops"
+      error_pattern: "for\\s+\\w+\\s+in\\s+range\\("
+      example: |
+        # Bad
+        def square_elements(x):
+            result = []
+            for i in x:
+                result.append(i ** 2)
+            return jnp.array(result)
+        
+        # Good
+        def square_elements(x):
+            return jnp.square(x)
+      fix: |
+        Refactor the code to use jax.numpy vectorized operations or apply jax.vmap to efficiently process array elements.
+
+    - rule: "JAX-DATA-TRANSFER-001"
+      desc: "Minimize host-device data transfers"
+      error_pattern: "jax\\.device_put\\("
+      example: |
+        # Bad
+        def f(x):
+            x = jax.device_put(x)
+            # repeated transfers
+            ...
+        
+        # Good
+        def f(x):
+            # transfer data once and keep it on device
+            x_device = jax.device_put(x)
+            ...
+      fix: |
+        Use jax.device_put once at the beginning to move data to the device and avoid unnecessary host-device transfers.
+
+  advanced:
+    - rule: "JAX-PURE-001"
+      desc: "Ensure jitted functions are pure"
+      error_pattern: "@jit.*(print\\(|global\\s+)"
+      example: |
+        # Bad
+        @jax.jit
+        def f(x):
+            print(x)
+            return x + 1
+        
+        # Good
+        @jax.jit
+        def f(x):
+            return x + 1
+      fix: |
+        Remove side effects such as printing or modifying global state from jitted functions.
+
+    - rule: "JAX-SIDE-EFFECT-001"
+      desc: "Avoid side effects in jitted functions"
+      error_pattern: "@jit.*(global\\s+|modify\\s+state)"
+      example: |
+        # Bad
+        @jax.jit
+        def f(x):
+            global counter
+            counter += 1
+            return x * 2
+        
+        # Good
+        def f(x, counter):
+            return x * 2
+        f = jax.jit(f)
+      fix: |
+        Remove or isolate side effects from jitted functions by passing state explicitly.
+
+    - rule: "JAX-CONTROLFLOW-001"
+      desc: "Use JAX control flow constructs instead of Python control flow"
+      error_pattern: "if\\s+.*:"
+      example: |
+        # Bad
+        @jax.jit
+        def f(x):
+            if x > 0:
+                return x
+            else:
+                return -x
+        
+        # Good
+        @jax.jit
+        def f(x):
+            return jax.lax.cond(x > 0, lambda _: x, lambda _: -x, operand=None)
+      fix: |
+        Replace Python's if/else control flow with jax.lax.cond or jax.lax.switch for compatibility with JIT.
+
+    - rule: "JAX-PYTHON-DATA-001"
+      desc: "Avoid using mutable Python data structures inside jitted functions"
+      error_pattern: "(list\\(|dict\\()"
+      example: |
+        # Bad
+        @jax.jit
+        def f(x):
+            result = []
+            for i in x:
+                result.append(i)
+            return jnp.array(result)
+        
+        # Good
+        @jax.jit
+        def f(x):
+            return jnp.array(x)
+      fix: |
+        Use vectorized operations or jax.numpy functions instead of building Python lists or dictionaries inside jitted functions.
+
+    - rule: "JAX-DTYPE-001"
+      desc: "Specify explicit data types for arrays to ensure precision"
+      error_pattern: "jnp\\.array\\(.*\\)(?!.*dtype=)"
+      example: |
+        # Bad
+        a = jnp.array([1, 2, 3])
+        
+        # Good
+        a = jnp.array([1, 2, 3], dtype=jnp.float32)
+      fix: |
+        Always specify the dtype when creating arrays if numerical precision is a concern.
+
+analysis_rules:
+  - "Always report source/target language versions (e.g., C++17 vs C++23)"
+  - "Identify domain-specific requirements (HPC, ML, etc.)"
+  - "Check for architecture-specific assumptions (x86 vs ARM)"
+  - "Report potential precision differences between numerical types"
