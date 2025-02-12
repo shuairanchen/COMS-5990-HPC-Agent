@@ -46,7 +46,7 @@ C:
   arrays:
     - rule: "C-ARR-001"
       desc: "Prevent array index out-of-bounds"
-      error_pattern: "\\[\\s*\\d+\\s*\\]"
+      error_pattern: "\\[\\s*(\\d+|\\w+)\\s*\\]\\s*>=?\\s*\\w+"
       example: |
         // Bad
         int arr[10];
@@ -140,7 +140,7 @@ C:
   pointer_validation:
     - rule: "C-PTR-001"
       desc: "Always validate pointers before dereferencing"
-      error_pattern: ""
+      error_pattern: "\\*\\s*\\w+(?![^{}]*=\\s*NULL)"
       example: |
         // Bad
         int* ptr = malloc(sizeof(int));
@@ -171,19 +171,6 @@ C:
         }
       fix: |
         Use a temporary pointer when calling realloc to safely handle allocation failures.
-  
-  macro_usage:
-    - rule: "C-MAC-001"
-      desc: "Avoid excessive use of macros"
-      error_pattern: "^#define\\s+\\w+"
-      example: |
-        // Bad
-        #define MAX_SIZE 100
-        
-        // Good
-        const int MAX_SIZE = 100;
-      fix: |
-        Prefer constant variables (const) or enums over preprocessor macros for constants.
   
   type_consistency:
     - rule: "C-TYPE-001"
@@ -241,7 +228,7 @@ C++:
            std::vector<int> arr(100);
     - rule: "CPP-RES-002"
       desc: "Prefer std::make_unique and std::make_shared"
-      error_pattern: "new\\s+std::(unique_ptr|shared_ptr)"
+      error_pattern: "(std::(unique|shared)_ptr<.*>\\s+\\w+)\\s*\\(\\s*new\\s+"
       example: |
         // Bad
         std::unique_ptr<MyClass> obj(new MyClass());
@@ -339,7 +326,7 @@ C++:
   modern_cpp:
     - rule: "CPP-MODERN-001"
       desc: "Prefer auto for type inference when appropriate"
-      error_pattern: "\\b[A-Z][a-zA-Z0-9_]*\\s+[a-zA-Z0-9_]+\\s*=\\s*[^;]+;"
+      error_pattern: "\\b(int|double|float|char)\\s+\\w+\\s*="
       example: |
         // Bad
         std::vector<int> v = get_vector();
@@ -405,7 +392,7 @@ FORTRAN:
         Always initialize variables when declaring them to avoid undefined behavior.
     - rule: "F-DEC-004"
       desc: "Minimize use of GOTO statements"
-      error_pattern: "GOTO\\s+\\w+"
+      error_pattern: "GOTO\\s+(?!ERR_)\\w+"
       example: |
         ! Bad
         IF (condition) GOTO 100
@@ -471,7 +458,7 @@ CUDA:
   host_memory:
     - rule: "CUDA-HMEM-001"
       desc: "Use pinned memory for host allocations when using DMA"
-      error_pattern: "malloc\\s*\\(.*\\)"
+      error_pattern: "(malloc|new)\\s*\\(.*\\)"
       example: |
         // Bad
         float* h_data = malloc(size);
@@ -589,8 +576,8 @@ CUDA:
 
   grid_configuration:
     - rule: "CUDA-DIM-001"
-      desc: "Configure grid and block dimensions appropriately"
-      error_pattern: "<<<.*>>>"
+      desc: "Avoid using grid dimensions not divisible by 32"
+      error_pattern: "<<<\\s*\\d+\\s*,"
       example: |
         // Bad: Suboptimal grid configuration
         kernel<<<1, 32>>>(...);
@@ -757,7 +744,7 @@ JAX:
 
     - rule: "JAX-VECTORIZE-001"
       desc: "Prefer vectorized operations over explicit loops"
-      error_pattern: "for\\s+\\w+\\s+in\\s+range\\("
+      error_pattern: "(for\\s+\\w+\\s+in\\s+)|(\\[.*for\\s+\\w+\\s+in)"
       example: |
         # Bad
         def square_elements(x):
