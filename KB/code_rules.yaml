@@ -955,6 +955,178 @@ JAX:
         a = jnp.array([1, 2, 3])
       fix: |
         Always use 'import jax.numpy as jnp' to maintain consistency and simplify code.
+        
+PyTorch:
+  tensor_operations:
+    - rule: "TORCH-TENSOR-001"
+      desc: "Avoid in-place tensor operations"
+      error_pattern: "\\.copy_\\(|\\.add_\\(|\\.sub_\\(|\\.mul_\\(|\\.div_\\("
+      example: |
+        # Bad
+        x = torch.tensor([1.0, 2.0, 3.0])
+        x.add_(1)
+        
+        # Good
+        x = torch.tensor([1.0, 2.0, 3.0])
+        x = x + 1
+      fix: |
+        Use functional tensor operations to avoid in-place modifications:
+        x = x + 1
+
+  device_management:
+    - rule: "TORCH-DEVICE-001"
+      desc: "Always specify device for tensors"
+      error_pattern: "torch\\.tensor\\("
+      example: |
+        # Bad
+        x = torch.tensor([1.0, 2.0, 3.0])
+        
+        # Good
+        x = torch.tensor([1.0, 2.0, 3.0], device='cuda')
+      fix: |
+        Explicitly specify the device when creating tensors to ensure they are on the intended device (CPU or GPU).
+
+  random_number_generation:
+    - rule: "TORCH-RANDOM-001"
+      desc: "Set random seed for reproducibility"
+      error_pattern: "torch\\.manual_seed\\("
+      example: |
+        # Bad
+        torch.randn(10)
+        
+        # Good
+        torch.manual_seed(42)
+        torch.randn(10)
+
+      fix: |
+        Set the random seed at the beginning of your script or function to ensure reproducibility:
+        torch.manual_seed(42)
+
+  model_training:
+    - rule: "TORCH-TRAIN-001"
+      desc: "Use torch.nn.Module for defining models"
+      error_pattern: "class\\s+\\w+\\(.*\\):"
+      example: |
+        # Bad
+        class MyModel:
+            def __init__(self):
+                self.layer = torch.nn.Linear(10, 1)
+        
+        # Good
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.layer = torch.nn.Linear(10, 1)
+      fix: |
+        Ensure your model classes inherit from torch.nn.Module and call the superclass constructor:
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.layer = torch.nn.Linear(10, 1)
+
+    - rule: "TORCH-TRAIN-002"
+      desc: "Use DataLoader for batching data"
+      error_pattern: "for\\s+\\w+\\s+in\\s+\\w+:"
+      example: |
+        # Bad
+        for i in range(0, len(data), batch_size):
+            batch = data[i:i+batch_size]
+        
+        # Good
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        for batch in dataloader:
+            ...
+      fix: |
+        Use DataLoader for efficient data batching and shuffling:
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        for batch in dataloader:
+            ...
+
+    - rule: "TORCH-TRAIN-003"
+      desc: "Use torch.optim for optimization"
+      error_pattern: "optimizer\\s*=\\s*\\w+"
+      example: |
+        # Bad
+        def sgd(params, lr):
+            for p in params:
+                p.data -= lr * p.grad.data
+        
+        # Good
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        optimizer.step()
+      fix: |
+        Use the built-in optimizers from torch.optim for standard optimization algorithms:
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        optimizer.step()
+
+  loss_functions:
+    - rule: "TORCH-LOSS-001"
+      desc: "Use torch.nn for loss functions"
+      error_pattern: "loss\\s*=\\s*\\w+"
+      example: |
+        # Bad
+        def mse_loss(pred, target):
+            return ((pred - target) ** 2).mean()
+        
+        # Good
+        loss_fn = torch.nn.MSELoss()
+        loss = loss_fn(pred, target)
+      fix: |
+        Use the loss functions provided by torch.nn for standard loss calculations:
+        loss_fn = torch.nn.MSELoss()
+        loss = loss_fn(pred, target)
+
+  evaluation:
+    - rule: "TORCH-EVAL-001"
+      desc: "Set model to evaluation mode during evaluation"
+      error_pattern: "model\\.eval\\(\\)"
+      example: |
+        # Bad
+        model(data)
+        
+        # Good
+        model.eval()
+        model(data)
+      fix: |
+        Call model.eval() before evaluating the model to set it to evaluation mode and disable dropout and batch normalization:
+        model.eval()
+        model(data)
+
+  saving_loading:
+    - rule: "TORCH-SAVE-001"
+      desc: "Use torch.save and torch.load for saving and loading models"
+      error_pattern: "torch\\.save\\(|torch\\.load\\("
+      example: |
+        # Bad
+        with open('model.pth', 'wb') as f:
+            pickle.dump(model, f)
+        
+        # Good
+        torch.save(model.state_dict(), 'model.pth')
+        model.load_state_dict(torch.load('model.pth'))
+      fix: |
+        Use torch.save and torch.load for saving and loading model state dictionaries:
+        torch.save(model.state_dict(), 'model.pth')
+        model.load_state_dict(torch.load('model.pth'))
+
+  mixed_precision:
+    - rule: "TORCH-AMP-001"
+      desc: "Use torch.cuda.amp for mixed precision training"
+      error_pattern: "with\\s+torch\\.no_grad\\(\\)"
+      example: |
+        # Bad
+        with torch.no_grad():
+            output = model(input)
+        
+        # Good
+        scaler = torch.cuda.amp.GradScaler()
+        with torch.cuda.amp.autocast():
+            output = model(input)
+      fix: |
+        Use torch.cuda.amp for automatic mixed precision training:
+        scaler = torch.cuda.amp.GradScaler()
+        with torch.cuda.amp.autocast():
+            output = model(input)
 
 analysis_rules:
   - "Always report source/target language versions (e.g., C++17 vs C++23)"
