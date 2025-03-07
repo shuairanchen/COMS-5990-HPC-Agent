@@ -1,0 +1,17 @@
+[
+  {
+    "error": "Error processing request",
+    "timestamp": "2025-03-07T14:14:54.103852+00:00",
+    "state": {
+      "error": "expected string or bytes-like object",
+      "error_type": "TypeError",
+      "error_details": {
+        "traceback": "<traceback object at 0x0000021D950D8080>",
+        "step": "process_request"
+      },
+      "status": "failed",
+      "processing_time": 43.992338
+    },
+    "details": "expected string or bytes-like object"
+  }
+]
