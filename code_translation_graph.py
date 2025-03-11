@@ -422,12 +422,22 @@ class CodeTranslationGraph:
         print("===========================================")
         print("Start Generate Plan")
         
+        source_language = str(state.get('source_language', '')) if state.get('source_language') is not None else ''
+        target_language = str(state.get('target_language', '')) if state.get('target_language') is not None else ''
+        code_content = str(state.get('code_content', '')) if state.get('code_content') is not None else ''
+        
+        potential_issues = []
+        if 'potential_issues' in state and state['potential_issues'] is not None:
+            for issue in state['potential_issues']:
+                if issue is not None:
+                    potential_issues.append(str(issue))
+        
         # Delegate to analysis agent for planning
         plan = self.analysis_agent.generate_plan(
-            source_language=state.get('source_language'),
-            target_language=state.get('target_language'),
-            code_content=state.get('code_content'),
-            potential_issues=state.get('potential_issues', [])
+            source_language=source_language,
+            target_language=target_language,
+            code_content=code_content,
+            potential_issues=potential_issues
         )
         
         state["conversion_plan"] = plan
@@ -702,81 +712,109 @@ class CodeTranslationGraph:
         print("===========================================")
         print("Start Code Improvement")
         
-        # Extract required fields
-        validation_result = state.get("validation_result", "")
-        translated_code = state.get("translated_code", "")
-        target_language = state.get("target_language", "")
-        
-        # Validate inputs
-        if not validation_result or not translated_code:
-            error_msg = "Missing validation result or code for improvement"
-            self._log_error(error_msg, state)
-            state["error"] = error_msg
-            return state
-        
-        # Extract metadata from validation
-        validation_metadata = state.get("validation_metadata", {})
-        classification = validation_metadata.get("classification", "unknown")
-        severity = validation_metadata.get("severity", "medium")
-        priority = validation_metadata.get("priority", "deferred")
-        violated_rules = validation_metadata.get("violated_rules", [])
-        
-        # Get current phase
-        current_phase = self._get_current_phase(state)
-        
-        # Get relevant rules for violated rules
-        relevant_rules = self._retrieve_relevant_rules(violated_rules, target_language)
-        
-        # Generate code diff if we have previous versions
-        code_diff = ""
-        if state.get("previous_versions"):
-            previous_code = state["previous_versions"][-1]
-            code_diff = self._generate_code_diff(previous_code, translated_code)
-        
-        # Get compiler feedback if available
-        compiler_feedback = ""
-        if not state.get("compilation_success", True) and state.get("compilation_output"):
-            compiler_feedback = state["compilation_output"]
-            if state.get("compilation_error_analysis"):
-                compiler_feedback += "\n\nError Analysis:\n"
-                for issue in state.get("compilation_error_analysis", {}).get("common_issues", []):
-                    compiler_feedback += f"- {issue}\n"
-                for fix in state.get("compilation_error_analysis", {}).get("suggested_fixes", []):
-                    compiler_feedback += f"- Suggestion: {fix}\n"
-        
-        # Track previous version
-        if "previous_versions" not in state:
-            state["previous_versions"] = []
-        state["previous_versions"].append(translated_code)
-        
-        # Increment iteration counter
-        state["iteration"] = state.get("iteration", 0) + 1
-        
-        # Check if we've reached max iterations
-        if state["iteration"] >= self.max_iterations:
-            state["max_iterations_reached"] = True
-            self._log_step("max_iterations_reached", state, {
-                "iterations": state["iteration"],
-                "max_allowed": self.max_iterations
-            })
-            return state
-        
-        # Improve the code
         try:
+            # Extract and convert required fields
+            validation_result = str(state.get("validation_result", "")) if state.get("validation_result") is not None else ""
+            translated_code = str(state.get("translated_code", "")) if state.get("translated_code") is not None else ""
+            target_language = str(state.get("target_language", "")) if state.get("target_language") is not None else ""
+            
+            # Debug information
+            print("===========================================")
+            print("Debug Information:")
+            print(f"Validation Result Type: {type(state.get('validation_result'))}")
+            print(f"Translated Code Type: {type(state.get('translated_code'))}")
+            print(f"Target Language Type: {type(state.get('target_language'))}")
+            print(f"Validation Metadata Type: {type(state.get('validation_metadata', {}))}")
+            print("===========================================")
+            
+            # Validate inputs
+            if not validation_result or not translated_code:
+                error_msg = "Missing validation result or code for improvement"
+                self._log_error(error_msg, state)
+                state["error"] = error_msg
+                return state
+            
+            # Extract metadata from validation
+            validation_metadata = state.get("validation_metadata", {})
+            if not isinstance(validation_metadata, dict):
+                validation_metadata = {}
+                
+            classification = str(validation_metadata.get("classification", "unknown"))
+            severity = str(validation_metadata.get("severity", "medium"))
+            priority = str(validation_metadata.get("priority", "deferred"))
+            
+            violated_rules = []
+            if "violated_rules" in validation_metadata:
+                raw_rules = validation_metadata["violated_rules"]
+                if isinstance(raw_rules, list):
+                    for rule in raw_rules:
+                        if rule is not None:
+                            violated_rules.append(str(rule))
+                elif raw_rules is not None:
+                    violated_rules.append(str(raw_rules))
+            
+            # 打印调试信息
+            print("Validation Metadata Details:")
+            print(f"  Classification: {classification}")
+            print(f"  Severity: {severity}")
+            print(f"  Priority: {priority}")
+            print(f"  Violated Rules: {violated_rules}")
+            
+            # Get current phase
+            current_phase = self._get_current_phase(state)
+            
+            # Get relevant rules for violated rules
+            relevant_rules = self._retrieve_relevant_rules(violated_rules, target_language)
+            
+            # Generate code diff if we have previous versions
+            code_diff = ""
+            if state.get("previous_versions"):
+                previous_code = str(state["previous_versions"][-1]) if state["previous_versions"][-1] is not None else ""
+                code_diff = self._generate_code_diff(previous_code, translated_code)
+            
+            # Get compiler feedback if available
+            compiler_feedback = ""
+            if not state.get("compilation_success", True) and state.get("compilation_output"):
+                compiler_feedback = str(state.get("compilation_output", ""))
+                if state.get("compilation_error_analysis"):
+                    compiler_feedback += "\n\nError Analysis:\n"
+                    for issue in state.get("compilation_error_analysis", {}).get("common_issues", []):
+                        compiler_feedback += f"- {str(issue)}\n"
+                    for fix in state.get("compilation_error_analysis", {}).get("suggested_fixes", []):
+                        compiler_feedback += f"- Suggestion: {str(fix)}\n"
+            
+            # Track previous version
+            if "previous_versions" not in state:
+                state["previous_versions"] = []
+            state["previous_versions"].append(translated_code)
+            
+            # Increment iteration counter
+            state["iteration"] = state.get("iteration", 0) + 1
+            
+            # Check if we've reached max iterations
+            if state["iteration"] >= self.max_iterations:
+                state["max_iterations_reached"] = True
+                self._log_step("max_iterations_reached", state, {
+                    "iterations": state["iteration"],
+                    "max_allowed": self.max_iterations
+                })
+                return state
+            
+            # Improve the code
             improved_code = self.translation_agent.improve_code(
-                translated_code,
-                validation_result,
-                current_phase,
-                target_language,
-                priority,
-                severity,
-                relevant_rules,
-                code_diff,
-                compiler_feedback
+                code=translated_code,
+                validation_result=validation_result,
+                current_phase=current_phase,
+                target_language=target_language,
+                priority=priority,
+                severity=severity,
+                relevant_rules=relevant_rules,
+                code_diff=code_diff,
+                compiler_feedback=compiler_feedback
             )
             
             # Clean up the improved code for compilation
-            improved_code = self._clean_code_for_compilation(improved_code)
+            improved_code = self._clean_code_for_compilation(str(improved_code) if improved_code is not None else "")
             
             # Update state
             state["translated_code"] = improved_code
@@ -793,6 +831,10 @@ class CodeTranslationGraph:
             error_msg = f"Code improvement failed: {str(e)}"
             self._log_error(error_msg, state, e)
             state["error"] = error_msg
+            print(f"Error details: {str(e)}")
+            import traceback
+            print("Stack trace:")
+            print(traceback.format_exc())
         
         print("===========================================")
         return state
@@ -964,54 +1006,43 @@ class CodeTranslationGraph:
             return "Phase 4: Performance Tuning"
     
     def _retrieve_relevant_rules(self, violated_rules: List[str], target_lang: str) -> str:
-        """Retrieve relevant rules based on violated rules"""
-        if not violated_rules or not self.knowledge_base:
+        """Retrieve relevant rules from knowledge base based on violated rules"""
+        if not violated_rules or not target_lang:
             return ""
+            
+        safe_rules = []
+        for rule in violated_rules:
+            if rule is not None:
+                safe_rules.append(str(rule))
         
-        # Get all rules for target language
-        lang_rules = self.knowledge_base.get(target_lang, {})
+        print("===========================================")
+        print("Debug Information in _retrieve_relevant_rules:")
+        print(f"Violated Rules: {safe_rules}")
+        print(f"Target Language: {target_lang}")
+        print("===========================================")
         
-        # Initialize results
+        # Get rules from knowledge base
+        kb_rules = self.knowledge_base.get(target_lang, {})
+        
+        # Extract relevant rules
         relevant_rules = []
         
-        # Iterate through all rule categories
-        for category, rules_list in lang_rules.items():
-            if category == "analysis_rules":
-                continue  # Skip analysis rules
-            
-            # Iterate through all rules in this category
-            for rule in rules_list:
-                # Check if rule ID is in violated list
-                rule_id_match = re.search(r"([A-Z]{2}-\d{3})", rule)
-                if rule_id_match:
-                    rule_id = rule_id_match.group(1)
-                    if any(rule_id in violated for violated in violated_rules):
-                        relevant_rules.append(f"[{category.upper()}] {rule}")
-            
-            # Also check keyword matching
-            for violated in violated_rules:
-                if not re.match(r"[A-Z]{2}-\d{3}", violated) and violated.lower() in rule.lower():
-                    relevant_rules.append(f"[{category.upper()}] {rule}")
+        for rule_id in safe_rules:
+            # Try to find rule in knowledge base
+            for category, rules in kb_rules.items():
+                if category == "analysis_rules":
+                    continue
+                    
+                for rule in rules:
+                    if rule_id in rule:
+                        relevant_rules.append(f"[{rule_id}] {rule}")
+                        break
         
-        # If no relevant rules found, return some general rules
-        if not relevant_rules:
-            general_rules = []
-            for category, rules_list in lang_rules.items():
-                if category != "analysis_rules":
-                    # Add first two rules from each category as general rules
-                    general_rules.extend([f"[{category.upper()}] {rule}" for rule in rules_list[:2]])
+        # If no specific rules found, return general rules
+        if not relevant_rules and "general_rules" in kb_rules:
+            relevant_rules = kb_rules["general_rules"]
             
-            if general_rules:
-                return "General Rules:\n" + "\n".join(general_rules)
-            return ""
-        
-        # Update rule cache
-        with self.cache_lock:
-            for rule_id in violated_rules:
-                if re.match(r"[A-Z]{2}-\d{3}", rule_id):
-                    self.rule_cache[rule_id] = datetime.now(timezone.utc).isoformat()
-        
-        return "Relevant Rules:\n" + "\n".join(relevant_rules)
+        return "\n".join(relevant_rules)
 
     def _generate_code_diff(self, old_code: str, new_code: str) -> str:
         """Generate code difference report"""

@@ -19,6 +19,11 @@ class TranslationAgent:
     
     def translate_code(self, source_language: str, target_language: str, code_content: str) -> str:
         """Translate code from source language to target language with compiler awareness"""
+
+        source_language = str(source_language) if source_language is not None else ""
+        target_language = str(target_language) if target_language is not None else ""
+        code_content = str(code_content) if code_content is not None else ""
+        
         translation_template = """You are an HPC code conversion expert. Convert this {{source_language}} code to {{target_language}}:
         Requirements:
         1. Maintain identical algorithmic logic
@@ -54,6 +59,7 @@ class TranslationAgent:
             "target_language": target_language,
             "code_input": code_content
         })
+        print(result.content)
         
         return result.content
     
@@ -61,88 +67,116 @@ class TranslationAgent:
                     target_language: str, priority: str, severity: str, 
                     relevant_rules: str, code_diff: str, compiler_feedback: str = "") -> str:
         """Improve code based on validation findings and compiler feedback"""
-        # Ensure all inputs are string type
-        validation_result = str(validation_result) if validation_result is not None else ""
-        current_phase = str(current_phase) if current_phase is not None else ""
-        target_language = str(target_language) if target_language is not None else ""
-        priority = str(priority) if priority is not None else "deferred"
-        severity = str(severity) if severity is not None else "medium"
-        relevant_rules = str(relevant_rules) if relevant_rules is not None else ""
-        code_diff = str(code_diff) if code_diff is not None else ""
-        compiler_feedback = str(compiler_feedback) if compiler_feedback is not None else ""
-        
-        improvement_template = """Improve the code based on validation findings and compiler feedback while maintaining original functionality.
-        
-        **Context**
-        - Current Phase: {{current_phase}}
-        - Severity Level: {{severity | upper}}
-        - Priority Level: {{priority}}
-        - Related Rules: {% for rule in violated_rules %}{{ rule }}{% if not loop.last %}，{% endif %}{% endfor %}
-        
-        **Required Modifications**
-        {{validation_summary}}
-        
-        {% if compiler_feedback %}
-        **Compiler Feedback**
-        {{compiler_feedback}}
-        {% endif %}
-        
-        **Relevant Rules**
-        {{relevant_rules}}
-        
-        **Code Diff Analysis**
-        {{code_diff}}
-        
-        **Implementation Requirements**
-        1. Modify only necessary content (add // MODIFIED comment)
-        2. Keep the original code structure
-        3. Give priority to {{ target_language }} recommended style
-        4. Ensure code compiles successfully and executes correctly
-        5. Focus on both correctness and performance
-        6. IMPORTANT: Return a COMPLETE, COMPILABLE program with all necessary:
-           - Include statements/imports
-           - Main function or entry point
-           - Variable declarations
-           - Initialization code
-           - Error handling
-        
-        Return FULL IMPLEMENTATION with changes clearly visible.
-        """
-        
-        # Extract violated rules from validation result
-        violated_rules = []
-        for line in validation_result.split("\n"):
-            if "Rule" in line and ":" in line:
-                rule_id = line.split(":")[0].strip()
-                if rule_id and any(c.isdigit() for c in rule_id):
-                    violated_rules.append(rule_id)
-        
-        prompt = PromptTemplate(
-            template=improvement_template,
-            input_variables=["validation_summary", "current_phase", "priority", "severity", "code_diff", "compiler_feedback"],
-            partial_variables={
-                "violated_rules": violated_rules,
-                "relevant_rules": relevant_rules,
-                "target_language": target_language
-            },
-            template_format="jinja2"
-        )
-        
-        chain = prompt | self.llm
-        
-        result = chain.invoke({
-            "validation_summary": validation_result,
-            "current_phase": current_phase,
-            "priority": priority,
-            "severity": severity,
-            "code_diff": code_diff,
-            "compiler_feedback": compiler_feedback
-        })
-        
-        # Extract code from result if it contains surrounding markdown or text
-        code = self._extract_code_from_result(result.content)
-        
-        return code
+        try:
+            # Ensure all inputs are string type
+            code = str(code) if code is not None else ""
+            validation_result = str(validation_result) if validation_result is not None else ""
+            current_phase = str(current_phase) if current_phase is not None else ""
+            target_language = str(target_language) if target_language is not None else ""
+            priority = str(priority) if priority is not None else "deferred"
+            severity = str(severity) if severity is not None else "medium"
+            relevant_rules = str(relevant_rules) if relevant_rules is not None else ""
+            code_diff = str(code_diff) if code_diff is not None else ""
+            compiler_feedback = str(compiler_feedback) if compiler_feedback is not None else ""
+            
+            # Debug information
+            print("===========================================")
+            print("Debug Information in improve_code:")
+            print(f"Code Type: {type(code)}")
+            print(f"Validation Result Type: {type(validation_result)}")
+            print(f"Current Phase Type: {type(current_phase)}")
+            print("===========================================")
+            
+            improvement_template = """Improve the code based on validation findings and compiler feedback while maintaining original functionality.
+            
+            **Context**
+            - Current Phase: {{current_phase}}
+            - Severity Level: {{severity | upper}}
+            - Priority Level: {{priority}}
+            - Related Rules: {% for rule in violated_rules %}{{ rule }}{% if not loop.last %}，{% endif %}{% endfor %}
+            
+            **Required Modifications**
+            {{validation_summary}}
+            
+            {% if compiler_feedback %}
+            **Compiler Feedback**
+            {{compiler_feedback}}
+            {% endif %}
+            
+            **Relevant Rules**
+            {{relevant_rules}}
+            
+            **Code Diff Analysis**
+            {{code_diff}}
+            
+            **Implementation Requirements**
+            1. Modify only necessary content (add // MODIFIED comment)
+            2. Keep the original code structure
+            3. Give priority to {{ target_language }} recommended style
+            4. Ensure code compiles successfully and executes correctly
+            5. Focus on both correctness and performance
+            6. IMPORTANT: Return a COMPLETE, COMPILABLE program with all necessary:
+               - Include statements/imports
+               - Main function or entry point
+               - Variable declarations
+               - Initialization code
+               - Error handling
+            
+            Return FULL IMPLEMENTATION with changes clearly visible.
+            """
+            
+            # Extract violated rules from validation result
+            violated_rules = []
+            for line in validation_result.split("\n"):
+                if "Rule" in line and ":" in line:
+                    rule_id = line.split(":")[0].strip()
+                    if rule_id and any(c.isdigit() for c in rule_id):
+                        violated_rules.append(str(rule_id))
+            
+            safe_violated_rules = []
+            for rule in violated_rules:
+                if rule is not None:
+                    safe_violated_rules.append(str(rule))
+            
+            # 打印调试信息
+            print("Violated Rules Types:")
+            for i, rule in enumerate(safe_violated_rules):
+                print(f"  Rule {i}: {type(rule)} - {rule}")
+            
+            prompt = PromptTemplate(
+                template=improvement_template,
+                input_variables=["validation_summary", "current_phase", "priority", "severity", "code_diff", "compiler_feedback"],
+                partial_variables={
+                    "violated_rules": safe_violated_rules,
+                    "relevant_rules": relevant_rules,
+                    "target_language": target_language
+                },
+                template_format="jinja2"
+            )
+            
+            chain = prompt | self.llm
+            
+            result = chain.invoke({
+                "validation_summary": validation_result,
+                "current_phase": current_phase,
+                "priority": priority,
+                "severity": severity,
+                "code_diff": code_diff,
+                "compiler_feedback": compiler_feedback
+            })
+            
+            print(result.content)
+            # Extract code from result if it contains surrounding markdown or text
+            code = self._extract_code_from_result(result.content)
+            print("Extract code from result")
+            print(code)
+            return code
+        except Exception as e:
+            print(f"Error in improve_code: {e}")
+            import traceback
+            print("Stack trace:")
+            print(traceback.format_exc())
+            return ""
     
     def _extract_code_from_result(self, result: str) -> str:
         """Extract code from LLM result that might contain explanations"""

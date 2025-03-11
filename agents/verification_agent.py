@@ -20,6 +20,19 @@ class VerificationAgent:
     def validate_code(self, code: str, target_language: str, current_phase: str, 
                      potential_issues: List[str], iteration: int) -> Dict[str, Any]:
         """Validate code against target language rules and standards"""
+        
+        code = str(code) if code is not None else ""
+        target_language = str(target_language) if target_language is not None else ""
+        current_phase = str(current_phase) if current_phase is not None else ""
+        iteration = int(iteration) if iteration is not None else 0
+        
+        
+        safe_issues = []
+        if potential_issues:
+            for issue in potential_issues:
+                if issue is not None:
+                    safe_issues.append(str(issue))
+        
         # Get contextual information
         code_rules = self._get_code_rules(target_language)
         
@@ -69,7 +82,7 @@ class VerificationAgent:
         react_result = analysis_chain.invoke({
             "code": code,
             "current_phase": current_phase,
-            "potential_issues": potential_issues,
+            "potential_issues": safe_issues,
             "iteration": iteration
         })
         

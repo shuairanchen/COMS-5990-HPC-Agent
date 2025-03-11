@@ -142,6 +142,17 @@ class AnalysisAgent:
     def generate_plan(self, source_language: str, target_language: str, 
                       code_content: str, potential_issues: List[str]) -> str:
         """Generate an enhanced conversion plan based on analysis"""
+
+        source_language = str(source_language) if source_language is not None else ""
+        target_language = str(target_language) if target_language is not None else ""
+        code_content = str(code_content) if code_content is not None else ""
+
+        safe_issues = []
+        if potential_issues:
+            for issue in potential_issues:
+                if issue is not None:
+                    safe_issues.append(str(issue))
+        
         planning_template = """Develop a detailed HPC code conversion plan based on the following analysis:
         Source Language: {{source_language}}
         Target Language: {{target_language}}
@@ -174,9 +185,10 @@ class AnalysisAgent:
             "source_language": source_language,
             "target_language": target_language,
             "code_content": code_content,
-            "potential_issues": potential_issues
+            "potential_issues": safe_issues
         })
         
+        print(plan.content)
         return plan.content
     
     def _get_analysis_rules(self, target_lang: str) -> str:

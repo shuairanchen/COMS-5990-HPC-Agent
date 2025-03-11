@@ -426,7 +426,7 @@ class CompilerAgent:
             
             # Print execution output for debugging
             print("\n--- EXECUTION OUTPUT START ---")
-            print(result["execution_output"])
+            # print(result["execution_output"])
             print("--- EXECUTION OUTPUT END ---\n")
             
             if process.returncode == 0:
