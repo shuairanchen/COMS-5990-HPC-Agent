@@ -6,6 +6,8 @@ Responsible for code analysis, planning, and requirements detection
 
 import re
 from typing import Dict, List, Any, Tuple
+from datetime import datetime
+from pathlib import Path
 
 from langchain.prompts import PromptTemplate
 from langchain.schema.output_parser import StrOutputParser
@@ -142,54 +144,206 @@ class AnalysisAgent:
     def generate_plan(self, source_language: str, target_language: str, 
                       code_content: str, potential_issues: List[str]) -> str:
         """Generate an enhanced conversion plan based on analysis"""
-
+        # 确保所有输入都是字符串类型
         source_language = str(source_language) if source_language is not None else ""
         target_language = str(target_language) if target_language is not None else ""
         code_content = str(code_content) if code_content is not None else ""
-
+        
+        # 确保potential_issues是字符串列表
         safe_issues = []
         if potential_issues:
             for issue in potential_issues:
                 if issue is not None:
                     safe_issues.append(str(issue))
         
-        planning_template = """Develop a detailed HPC code conversion plan based on the following analysis:
+        # 提取代码特征，用于生成更具体的计划
+        code_features = self.extract_code_features(code_content)
+        
+        # 创建一个更详细的计划模板，包括HPC特定的考虑因素
+        planning_template = """Develop a comprehensive HPC code conversion plan based on the following analysis:
         Source Language: {{source_language}}
         Target Language: {{target_language}}
-        Code Content: 
-        ```
-        {{code_content}}
-        ```
-        Known Issues: {{potential_issues}}
         
-        Please create a comprehensive conversion plan covering:
-        1. Key Architectural Differences: Identify fundamental differences between {{source_language}} and {{target_language}} relevant to HPC
-        2. Parallelism Strategy: How parallel constructs will be translated
-        3. Memory Management: How memory operations will be handled
-        4. Performance Considerations: Key optimizations to apply
-        5. Validation Criteria: How to verify correctness post-conversion
+        Code Features:
+        {{code_features}}
+        
+        Known Issues: 
+        {% for issue in potential_issues %}
+        - {{issue}}
+        {% endfor %}
+        
+        Please create a detailed conversion plan covering:
+        
+        1. KEY ARCHITECTURAL DIFFERENCES:
+           - Compare memory models between {{source_language}} and {{target_language}}
+           - Identify thread/process model differences
+           - Analyze synchronization mechanism differences
+           - Evaluate data layout compatibility issues
+        
+        2. PARALLELISM STRATEGY:
+           - Map parallel constructs from {{source_language}} to {{target_language}}
+           - Define work distribution patterns for optimal load balancing
+           - Develop synchronization strategy for parallel regions
+           - Determine optimal granularity for parallelization
+        
+        3. MEMORY MANAGEMENT:
+           - Design data transfer strategy for heterogeneous memory
+           - Optimize array access patterns for spatial/temporal locality
+           - Address memory alignment requirements
+           - Implement efficient memory allocation/deallocation patterns
+        
+        4. PERFORMANCE OPTIMIZATION TARGETS:
+           - Identify critical hotspots for optimization
+           - List vectorization opportunities
+           - Develop loop transformation strategy (fusion, tiling, unrolling)
+           - Define instruction-level parallelism approach
+        
+        5. TRANSLATION WORKFLOW:
+           - Identify code regions requiring special attention
+           - Define incremental testing milestones
+           - Specify performance validation criteria
+           - Set correctness validation methodology
+        
+        6. HPC-SPECIFIC CONSIDERATIONS:
+           - Address scalability requirements
+           - Implement performance portability strategies
+           - Plan for resilience/fault tolerance if necessary
+           - Consider energy efficiency optimizations
         
         Output Format:
-        Conversion Plan:
-        - [Phase 1: Foundation]: Convert basic syntax and structure
-        - [Phase 2: Parallelism]: Map parallel constructs to {{target_language}} equivalents
-        - [Phase 3: Memory Optimization]: Optimize memory access patterns
-        - [Phase 4: Performance Tuning]: Apply {{target_language}}-specific optimizations
+        CONVERSION PLAN:
         
-        Current Phase: [Phase 1]
+        [Phase 1: Foundation] - ETA: X hours
+        - Task 1.1: [Specific task with approach]
+        - Task 1.2: [Specific task with approach]
+        ...
+        
+        [Phase 2: Parallelism] - ETA: X hours
+        - Task 2.1: [Specific task with approach]
+        - Task 2.2: [Specific task with approach]
+        ...
+        
+        [Phase 3: Memory Optimization] - ETA: X hours
+        - Task 3.1: [Specific task with approach]
+        - Task 3.2: [Specific task with approach]
+        ...
+        
+        [Phase 4: Performance Tuning] - ETA: X hours
+        - Task 4.1: [Specific task with approach]
+        - Task 4.2: [Specific task with approach]
+        ...
+        
+        VALIDATION STRATEGY:
+        - Correctness checks: [Specific methodology]
+        - Performance checks: [Specific metrics and methodology]
+        
+        POTENTIAL CHALLENGES:
+        - [Challenge 1]: [Mitigation strategy]
+        - [Challenge 2]: [Mitigation strategy]
+        
+        CURRENT PHASE: [Phase 1]
         """
         
         chain = PromptTemplate.from_template(planning_template, template_format="jinja2") | self.llm
         
+        # 调用LLM生成计划
         plan = chain.invoke({
             "source_language": source_language,
             "target_language": target_language,
-            "code_content": code_content,
+            "code_features": code_features,
             "potential_issues": safe_issues
         })
         
+        # 保存计划供后续使用
+        self._save_plan_to_log(source_language, target_language, plan.content)
+        
+        print("Generated conversion plan:")
+        print("=" * 50)
         print(plan.content)
+        print("=" * 50)
+        
         return plan.content
+        
+    def _save_plan_to_log(self, source_language: str, target_language: str, plan: str) -> None:
+        """将生成的计划保存到日志文件中以便后续分析和审查"""
+        try:
+            # 创建logs目录
+            log_dir = Path("logs/plans")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 使用时间戳创建唯一文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"plan_{source_language}_to_{target_language}_{timestamp}.txt"
+            filepath = log_dir / filename
+            
+            # 保存计划
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"CONVERSION PLAN: {source_language} TO {target_language}\n")
+                f.write(f"Generated: {datetime.now().isoformat()}\n\n")
+                f.write(plan)
+                
+            print(f"Plan saved to: {filepath}")
+        except Exception as e:
+            print(f"Error saving plan to log: {e}")
+
+    def extract_plan_for_phase(self, plan: str, phase_number: int) -> Dict[str, Any]:
+        """从计划中提取特定阶段的任务和策略"""
+        phase_map = {
+            1: "Foundation",
+            2: "Parallelism", 
+            3: "Memory Optimization",
+            4: "Performance Tuning"
+        }
+        phase_name = phase_map.get(phase_number, f"Phase {phase_number}")
+        
+        # 查找阶段开始和结束位置
+        phase_start = plan.find(f"[Phase {phase_number}:")
+        if phase_start == -1:
+            phase_start = plan.find(f"Phase {phase_number}:")
+        
+        if phase_start == -1:
+            return {"tasks": [], "phase_name": phase_name, "found": False}
+            
+        # 查找下一个阶段的开始位置，或者计划结束
+        next_phase_start = plan.find(f"[Phase {phase_number+1}:", phase_start)
+        if next_phase_start == -1:
+            next_phase_start = plan.find(f"Phase {phase_number+1}:", phase_start)
+            
+        if next_phase_start == -1:
+            # 如果没有下一个阶段，查找VALIDATION或POTENTIAL CHALLENGES部分
+            next_sections = ["VALIDATION", "POTENTIAL CHALLENGES", "CURRENT PHASE"]
+            for section in next_sections:
+                pos = plan.find(section, phase_start)
+                if pos != -1 and (next_phase_start == -1 or pos < next_phase_start):
+                    next_phase_start = pos
+        
+        # 如果仍未找到结束位置，使用整个剩余文本
+        if next_phase_start == -1:
+            next_phase_start = len(plan)
+            
+        # 提取当前阶段的内容
+        phase_content = plan[phase_start:next_phase_start].strip()
+        
+        # 提取任务列表
+        tasks = []
+        task_pattern = re.compile(r'- Task \d+\.\d+: (.*?)(?=\n- Task \d+\.\d+:|$)', re.DOTALL)
+        task_matches = task_pattern.findall(phase_content)
+        
+        if not task_matches:
+            # 尝试更一般的模式
+            task_pattern = re.compile(r'- (.*?)(?=\n-|$)', re.DOTALL)
+            task_matches = task_pattern.findall(phase_content)
+        
+        # 处理任务
+        for task in task_matches:
+            tasks.append(task.strip())
+            
+        return {
+            "phase_name": phase_name,
+            "tasks": tasks,
+            "found": True,
+            "phase_content": phase_content
+        }
     
     def _get_analysis_rules(self, target_lang: str) -> str:
         """Get enhanced analysis rules from knowledge base"""

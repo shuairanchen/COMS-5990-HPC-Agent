@@ -108,6 +108,16 @@ class CompilerAgent:
         language = language.upper()
         print(f"\n=== COMPILING {language} CODE ===")
         
+        # 紧急修复printf语句跨行问题
+        # 这一步是最后的安全网，确保即使前面的清理步骤失败，这里也能捕获并修复问题
+        code = self._emergency_fix_printf(code)
+        
+        # Print source code with line numbers for debugging
+        print("\n=== SOURCE CODE TO COMPILE ===")
+        for i, line in enumerate(code.split('\n')):
+            print(f"{i+1:4d}: {line}")
+        print("=== END OF SOURCE CODE ===\n")
+        
         # Create temporary files
         temp_file_path = self._create_temp_file(code, language)
         if not temp_file_path:
@@ -121,20 +131,72 @@ class CompilerAgent:
         
         # Compile the code
         print("\n--- COMPILATION PHASE ---")
-        compile_result = self._compile_code(temp_file_path, language)
-        result.update(compile_result)
         
-        if not compile_result["success"]:
-            print("Compilation failed. Skipping execution phase.")
+        # 修复这里的函数调用 - _compile_code方法需要正确定义或正确调用
+        output_file = os.path.splitext(temp_file_path)[0]
+        if platform.system() == "Windows":
+            output_file += ".exe"
+            
+        # 构建编译命令
+        compile_cmd = self._build_compile_command(temp_file_path, output_file, language)
+        if not compile_cmd:
+            error_msg = f"Cannot compile {language} code - no suitable compiler found"
+            result["errors"].append(error_msg)
+            print(f"ERROR: {error_msg}")
+            return result
+            
+        # 执行编译
+        try:
+            print(f"Executing compilation command: {' '.join(compile_cmd)}")
+            process = subprocess.run(
+                compile_cmd,
+                text=True,
+                capture_output=True,
+                check=False
+            )
+            
+            compiler_output = process.stdout + process.stderr
+            result["compiler_output"] = compiler_output
+            
+            # 打印编译输出（用于调试）
+            if compiler_output:
+                print("\n--- COMPILER OUTPUT START ---")
+                print(compiler_output)
+                print("--- COMPILER OUTPUT END ---\n")
+            
+            if process.returncode == 0 and os.path.exists(output_file):
+                result["success"] = True
+                result["executable"] = output_file
+                print("Compilation successful.")
+            else:
+                result["success"] = False
+                if compiler_output:
+                    error_lines = compiler_output.split('\n')
+                    errors = [line for line in error_lines if "error:" in line.lower()]
+                    result["errors"] = errors if errors else ["Compilation failed with unknown error"]
+                    print("Compilation errors detected:")
+                    for i, error in enumerate(errors, 1):
+                        print(f"  {i}. {error}")
+                else:
+                    result["errors"].append(f"Compilation failed with return code: {process.returncode}")
+                    print(f"Compilation failed with return code: {process.returncode}")
+                print("Compilation failed. Skipping execution phase.")
+                return result
+                
+        except Exception as e:
+            result["success"] = False
+            error_msg = f"Error during compilation: {str(e)}"
+            result["errors"].append(error_msg)
+            print(f"ERROR: {error_msg}")
             return result
         
         # Run the compiled code
         print("\n--- EXECUTION PHASE ---")
-        run_result = self._run_code(compile_result.get("executable"), language, timeout)
+        run_result = self._run_code(output_file, language, timeout)
         result.update(run_result)
         
         # Clean up temporary files (optional)
-        self._cleanup_files(temp_file_path, compile_result.get("executable"))
+        self._cleanup_files(temp_file_path, output_file)
         print("Temporary files cleaned up")
         
         print(f"=== COMPILATION AND EXECUTION COMPLETE ===\n")
@@ -167,89 +229,80 @@ class CompilerAgent:
         }
         return extensions.get(language, ".txt")
     
-    def _compile_code(self, source_file: str, language: str) -> Dict[str, Any]:
-        """Compile the code based on the language"""
-        result = {
-            "success": False,
-            "compiler_output": "",
-            "executable": None,
-            "errors": []
-        }
+    def _compile_code(self, state: Dict) -> Dict:
+        """Compile translated code and measure performance"""
+        print("===========================================")
+        print("Start Compilation")
         
-        # Generate output executable path
-        output_file = os.path.splitext(source_file)[0]
-        if platform.system() == "Windows":
-            output_file += ".exe"
+        # Extract code and target language
+        translated_code = str(state.get("translated_code", "")) if state.get("translated_code") is not None else ""
+        target_language = str(state.get("target_language", "")) if state.get("target_language") is not None else ""
         
-        # Build compilation command based on language
-        compile_cmd = self._build_compile_command(source_file, output_file, language)
+        if not translated_code or not target_language:
+            return {
+                "compilation_success": False,
+                "compilation_errors": ["Missing code or target language"]
+            }
+            
+        # Clean code for compilation
+        cleaned_code = self._clean_code_for_compilation(translated_code)
         
-        if not compile_cmd:
-            result["errors"].append(f"No compiler available for {language}")
-            print(f"ERROR: No compiler available for {language}")
-            return result
+        # Print cleaned code for debugging (with line numbers)
+        print("\n=== CLEANED CODE FOR COMPILATION ===")
+        for i, line in enumerate(cleaned_code.split('\n')):
+            print(f"{i+1:4d}: {line}")
+        print("=== END OF CLEANED CODE ===\n")
         
-        # Execute the compilation command
-        try:
-            print(f"Executing compilation command: {' '.join(compile_cmd)}")
+        # Skip compilation for languages that don't need it
+        if not self._is_language_compilable(target_language):
+            return {
+                "compilation_success": True,
+                "compilation_message": f"{target_language} does not require compilation",
+                "execution_output": "Execution not supported for this language"
+            }
             
-            process = subprocess.run(
-                compile_cmd,
-                text=True,
-                capture_output=True,
-                check=False
-            )
+        # Compile and run
+        compilation_result = self.compiler_agent.compile_and_run(
+            code=cleaned_code,
+            language=target_language
+        )
+        
+        # Extract relevant fields
+        success = compilation_result.get("success", False)
+        errors = compilation_result.get("errors", [])
+        compiler_output = compilation_result.get("compiler_output", "")
+        execution_output = compilation_result.get("execution_output", "")
+        execution_time = compilation_result.get("execution_time")
+        
+        # Analyze compiler output for errors if compilation failed
+        if not success and compiler_output:
+            error_analysis = self.compiler_agent.analyze_compilation_errors(compiler_output)
             
-            result["compiler_output"] = process.stdout + process.stderr
-            
-            # Print detailed compiler output for debugging
-            print("\n--- COMPILER OUTPUT START ---")
-            print(result["compiler_output"])
-            print("--- COMPILER OUTPUT END ---\n")
-            
-            if process.returncode == 0:
-                result["success"] = True
-                result["executable"] = output_file
-                print(f"Compilation successful. Executable: {output_file}")
+            # Log detailed error analysis
+            if error_analysis:
+                common_issues = error_analysis.get("common_issues", [])
+                if common_issues:
+                    print("Common Issues:")
+                    for issue in common_issues:
+                        print(f"- {issue}")
                 
-                # For Fortran with OpenMP on Windows, copy the OpenMP DLL to the executable directory
-                if platform.system() == "Windows" and language == "FORTRAN":
-                    for compiler_name, compiler_path in self.compilers.items():
-                        if compiler_name in ["gfortran"]:
-                            compiler_dir = os.path.dirname(compiler_path)
-                            dll_path = os.path.join(compiler_dir, "libgomp-1.dll")
-                            if os.path.exists(dll_path):
-                                output_dir = os.path.dirname(output_file)
-                                target_dll_path = os.path.join(output_dir, "libgomp-1.dll")
-                                try:
-                                    shutil.copy2(dll_path, target_dll_path)
-                                    print(f"Copied {dll_path} to {target_dll_path}")
-                                except Exception as e:
-                                    print(f"Warning: Failed to copy OpenMP DLL: {str(e)}")
-                            break
-            else:
-                result["errors"].append("Compilation failed")
-                # Extract specific error messages from compiler output
-                error_lines = [line for line in result["compiler_output"].split('\n') 
-                              if 'error:' in line.lower() or 'fatal error:' in line.lower()]
-                
-                if error_lines:
-                    print("Compilation errors detected:")
-                    for i, error in enumerate(error_lines[:5]):  # Show first 5 errors
-                        clean_error = error.strip()
-                        result["errors"].append(clean_error)
-                        print(f"  {i+1}. {clean_error}")
-                    
-                    if len(error_lines) > 5:
-                        print(f"  ... and {len(error_lines) - 5} more errors")
-                else:
-                    print("Compilation failed with unknown errors")
-        
-        except Exception as e:
-            result["errors"].append(f"Error during compilation: {str(e)}")
-            print(f"ERROR during compilation: {str(e)}")
-        
-        return result
+                suggested_fixes = error_analysis.get("suggested_fixes", [])
+                if suggested_fixes:
+                    print("Suggested Fixes:")
+                    for fix in suggested_fixes:
+                        print(f"- {fix}")
+        else:
+            error_analysis = {}
+            
+        # Update state
+        state["compilation_success"] = success
+        state["compilation_errors"] = errors
+        state["compilation_output"] = compiler_output
+        state["execution_output"] = execution_output if success else ""
+        state["execution_time_seconds"] = execution_time
+        state["compilation_error_analysis"] = error_analysis
+            
+        return state
     
     def _build_compile_command(self, source_file: str, output_file: str, language: str) -> Optional[list]:
         """Build the compilation command based on the language"""
@@ -581,3 +634,131 @@ class CompilerAgent:
             "runtime_environments": self.runtime_environments,
             "working_directory": self.working_dir
         }
+    
+    def _clean_code_for_compilation(self, code: str) -> str:
+        """Clean code for compilation, fixing common issues"""
+        if not code:
+            return code
+            
+        print("\n=== CLEANING CODE FOR COMPILATION ===")
+        print("Original code length:", len(code))
+        
+        # Fix 1: Normalize line endings to system standard
+        code = code.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Fix 2: Fix multi-line string literals in printf statements
+        print("Fixing multi-line string literals in printf...")
+        pattern = r'(printf\s*\(\s*"[^"]*?)(\n)([^"]*"\s*(?:,|\)))'
+        fixed_count = 0
+        while re.search(pattern, code):
+            code = re.sub(pattern, r'\1\\n\3', code, count=1)
+            fixed_count += 1
+        if fixed_count > 0:
+            print(f"  Fixed {fixed_count} multi-line printf statements")
+        
+        # Fix 3: Fix broken string literals without proper line continuation
+        print("Fixing broken string literals...")
+        pattern = r'("[^"]*?)(\n)([^"]*")'
+        fixed_count = 0
+        while re.search(pattern, code):
+            code = re.sub(pattern, r'\1 \3', code, count=1)
+            fixed_count += 1
+        if fixed_count > 0:
+            print(f"  Fixed {fixed_count} broken string literals")
+        
+        # Fix 4: Handle more complex multi-line strings with quotes in the middle
+        print("Fixing complex multi-line strings...")
+        lines = code.split('\n')
+        fixed_lines = []
+        open_quote = False
+        fixed_count = 0
+        
+        for i, line in enumerate(lines):
+            # Count quotes in the line (ignoring escaped quotes)
+            quotes = [m.start() for m in re.finditer(r'(?<!\\)"', line)]
+            quote_count = len(quotes)
+            
+            # If we have odd number of quotes, toggle the open_quote state
+            if quote_count % 2 == 1:
+                if open_quote:
+                    # This line closes a quote
+                    open_quote = False
+                else:
+                    # This line opens a quote that continues to next line
+                    open_quote = True
+                    # Check if next line continues the string
+                    if i < len(lines) - 1 and '"' in lines[i+1]:
+                        # Convert to proper line continuation with string concatenation
+                        if not line.endswith('"'):
+                            line = line + '" "'  # Close string and start new one
+                            fixed_count += 1
+            
+            # If line ends with an open quote, fix it
+            if open_quote and quotes and quotes[-1] == len(line) - 1:
+                line = line + '\\'  # Add line continuation
+                fixed_count += 1
+                
+            fixed_lines.append(line)
+        
+        if fixed_count > 0:
+            print(f"  Fixed {fixed_count} complex multi-line string issues")
+            
+        code = '\n'.join(fixed_lines)
+        
+        # Fix 5: Fix common error of missing newline at the end of file
+        if not code.endswith('\n'):
+            code += '\n'
+            print("  Added missing newline at end of file")
+        
+        print("Cleaned code length:", len(code))
+        print("=== CODE CLEANING COMPLETE ===\n")
+        return code
+    
+    def _emergency_fix_printf(self, code: str) -> str:
+        """紧急修复printf语句中的跨行问题"""
+        print("\n=== EMERGENCY PRINTF FIX ===")
+        fixed_code = code
+        
+        # 查找可能有问题的printf语句
+        printf_pattern = re.compile(r'(printf\s*\(\s*"[^"]*?)(\n)([^"]*")', re.DOTALL)
+        if printf_pattern.search(fixed_code):
+            print("检测到可能有问题的printf语句，正在修复...")
+            fixed_code = printf_pattern.sub(r'\1 \3', fixed_code)
+            
+        # 更进一步检查引号不匹配的问题
+        lines = fixed_code.split('\n')
+        open_quotes = False
+        fixed_lines = []
+        
+        for i, line in enumerate(lines):
+            # 如果这一行包含奇数个引号，表示引号状态发生了变化
+            if line.count('"') % 2 == 1:
+                if open_quotes:
+                    # 如果已经有未闭合的引号，这一行应该能闭合它
+                    open_quotes = False
+                else:
+                    # 如果没有未闭合的引号，那么这一行开始了一个新的字符串
+                    if i < len(lines) - 1:
+                        # 检查下一行是否可能是字符串的一部分
+                        next_line = lines[i+1]
+                        if '"' in next_line and next_line.count('"') % 2 == 1:
+                            # 很可能是跨行字符串，尝试合并
+                            print(f"合并第{i+1}行和第{i+2}行的跨行字符串")
+                            combined_line = line + " " + next_line
+                            fixed_lines.append(combined_line)
+                            i += 1  # 跳过下一行
+                            continue
+                    open_quotes = True
+            
+            # 处理普通行
+            fixed_lines.append(line)
+        
+        # 如果有未闭合的引号，尝试进行紧急修复
+        if open_quotes:
+            print("警告: 代码中存在未闭合的引号！添加闭合引号以避免编译错误")
+            fixed_lines[-1] = fixed_lines[-1] + '"'
+        
+        fixed_code = '\n'.join(fixed_lines)
+        print("=== EMERGENCY FIX COMPLETE ===\n")
+        
+        return fixed_code
