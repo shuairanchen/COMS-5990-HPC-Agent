@@ -52,16 +52,49 @@ class TranslationAgent:
             template_format="jinja2"
         )
         
-        chain = prompt | self.llm
-        
-        result = chain.invoke({
-            "source_language": source_language,
-            "target_language": target_language,
-            "code_input": code_content
-        })
-        print(result.content)
-        
-        return result.content
+        try:
+            chain = prompt | self.llm
+            
+            result = chain.invoke({
+                "source_language": source_language,
+                "target_language": target_language,
+                "code_input": code_content
+            })
+            
+            translated_code = None
+            
+            # try to extract content from result
+            if hasattr(result, 'content'):
+                translated_code = result.content
+            elif isinstance(result, str):
+                translated_code = result
+            elif isinstance(result, dict) and 'content' in result:
+                translated_code = result['content']
+            else:
+                # if cannot extract content directly, try to convert to string
+                translated_code = str(result)
+            
+            # clean possible thinking process (sometimes model returns <think>...</think> blocks)
+            translated_code = self._extract_code_from_result(translated_code)
+            
+            # ensure the returned code contains necessary elements
+            if not translated_code or len(translated_code.strip()) < 10:
+                print("Warning: model returned empty or too short translation result")
+                # provide a basic template
+                translated_code = f"""// Failed to translate {source_language} to {target_language}
+                // Here is a template for the target language:
+
+                // Target language: {target_language}
+                {code_content}
+                """
+            
+            print(f"Translation completed: {len(translated_code)} characters")
+            return translated_code
+            
+        except Exception as e:
+            print(f"Error in translate_code: {str(e)}")
+            # return original code, so the system can continue running
+            return f"// Error during translation: {str(e)}\n\n{code_content}"
     
     def improve_code(self, code: str, validation_result: str, current_phase: str,
                     target_language: str, priority: str, severity: str, 
@@ -138,7 +171,7 @@ class TranslationAgent:
                 if rule is not None:
                     safe_violated_rules.append(str(rule))
             
-            # 打印调试信息
+            # print debug information
             print("Violated Rules Types:")
             for i, rule in enumerate(safe_violated_rules):
                 print(f"  Rule {i}: {type(rule)} - {rule}")
@@ -179,14 +212,61 @@ class TranslationAgent:
             return ""
     
     def _extract_code_from_result(self, result: str) -> str:
-        """Extract code from LLM result that might contain explanations"""
-        # Check if the result is wrapped in code blocks
+        """Extract code from LLM result that might contain explanations or thinking process"""
+        if not result:
+            return ""
+            
+        # first, remove <think>...</think>
+        think_pattern = re.compile(r'<think>.*?</think>', re.DOTALL)
+        result = think_pattern.sub('', result).strip()
+        
+        # check if there are other thinking formats (e.g. "Let me think...")
+        thinking_patterns = [
+            r'(?i)Let me think\s*:.*?\n\s*\n',  # "Let me think: ..."
+            r'(?i)I need to analyze.*?\n\s*\n',  # "I need to analyze..."
+            r'(?i)First, I\'ll.*?\n\s*\n',      # "First, I'll..."
+            r'(?i)Step \d+:.*?\n\s*\n'          # "Step 1: ..."
+        ]
+        
+        for pattern in thinking_patterns:
+            result = re.sub(pattern, '', result, flags=re.DOTALL)
+        
+        # remove thinking/analysis content until finding code indicator
+        common_intros = [
+            r'(?i)Here\'s the .* code:',
+            r'(?i)Here is the .* code:',
+            r'(?i)The translated code is:',
+            r'(?i)Here\'s my solution:',
+            r'(?i)Here is the solution:'
+        ]
+        
+        for intro in common_intros:
+            intro_match = re.search(intro, result)
+            if intro_match:
+                intro_end = intro_match.end()
+                result = result[intro_end:].strip()
+                break
+        
+        # check if there are code blocks
         if "```" in result:
-            # Get content between first and last code block markers
+            # extract all code blocks
             code_blocks = re.findall(r"```(?:\w+)?\n(.*?)```", result, re.DOTALL)
             if code_blocks:
-                # Return the largest code block (most likely the complete program)
+                # return the longest code block, usually a complete program
                 return max(code_blocks, key=len).strip()
         
-        # If no code blocks, assume entire result is code
-        return result.strip()
+        # if there are no code block markers, try to find specific language markers
+        language_markers = ["#include", "import ", "package ", "using namespace", "public class"]
+        lines = result.split('\n')
+        start_line = 0
+        
+        for i, line in enumerate(lines):
+            if any(marker in line for marker in language_markers):
+                start_line = i
+                break
+        
+        # return the code part starting from the marked line
+        final_code = '\n'.join(lines[start_line:])
+        
+        # if still no code found, return the whole result content (removed thinking process)
+        return final_code.strip()

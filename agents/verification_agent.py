@@ -26,6 +26,8 @@ class VerificationAgent:
         current_phase = str(current_phase) if current_phase is not None else ""
         iteration = int(iteration) if iteration is not None else 0
         
+        # clean thinking process in code
+        code = self._clean_thinking_process(code)
         
         safe_issues = []
         if potential_issues:
@@ -86,11 +88,26 @@ class VerificationAgent:
             "iteration": iteration
         })
         
+        # get result content
+        result_content = ""
+        if hasattr(react_result, 'content'):
+            result_content = react_result.content
+        elif isinstance(react_result, str):
+            result_content = react_result
+        elif isinstance(react_result, dict) and 'content' in react_result:
+            result_content = react_result['content']
+        else:
+            # try to convert to string
+            result_content = str(react_result)
+            
+        # clean thinking process
+        cleaned_result = self._clean_thinking_process(result_content)
+        
         # Parse structured output
-        parsed_analysis = self._parse_react_analysis(react_result.content)
+        parsed_analysis = self._parse_react_analysis(cleaned_result)
         
         return {
-            "analysis": react_result.content,
+            "analysis": cleaned_result,
             "metadata": {
                 "classification": parsed_analysis.get("classification", "unknown"),
                 "severity": parsed_analysis.get("severity", "medium"),
@@ -143,3 +160,37 @@ class VerificationAgent:
             parsed["solution_approach"] = solution_match.group(1).strip()
             
         return parsed
+
+    def _clean_thinking_process(self, text: str) -> str:
+        """
+        Remove thinking process markers like <think>...</think>
+        
+        Args:
+            text: text to clean
+            
+        Returns:
+            cleaned text
+        """
+        if not text:
+            return ""
+            
+        # remove <think>...</think>
+        think_pattern = re.compile(r'<think>.*?</think>', re.DOTALL)
+        text = think_pattern.sub('', text).strip()
+        
+        # remove common thinking patterns
+        common_patterns = [
+            r'(?i)Let me think\s*:.*?\n\s*\n',      # "Let me think: ..." 
+            r'(?i)I\'ll analyze this.*?\n\s*\n',    # "I'll analyze this..."
+            r'(?i)Let\'s analyze.*?\n\s*\n',        # "Let's analyze..."
+            r'(?i)First, I need to.*?\n\s*\n',      # "First, I need to..."
+            r'(?i)Step \d+:.*?\n\s*\n',             # "Step 1: ..."
+            r'(?i)My thinking:.*?\n\s*\n',          # "My thinking:..."
+            r'(?i)Hmm, .*?\n\s*\n',                 # "Hmm, ..."
+            r'(?i)Okay, .*?\n\s*\n'                 # "Okay, ..."
+        ]
+        
+        for pattern in common_patterns:
+            text = re.sub(pattern, '', text, flags=re.DOTALL)
+            
+        return text.strip()

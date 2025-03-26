@@ -80,6 +80,10 @@ class AnalysisAgent:
         
         result = chain.invoke({"user_input": user_input})
         
+        # clean thinking process in analysis result
+        if "analysis" in result:
+            result["analysis"] = self._clean_thinking_process(result["analysis"])
+        
         # Parse the analysis text
         try:
             parsed_data = self._parse_analysis_text(result["analysis"])
@@ -144,22 +148,22 @@ class AnalysisAgent:
     def generate_plan(self, source_language: str, target_language: str, 
                       code_content: str, potential_issues: List[str]) -> str:
         """Generate an enhanced conversion plan based on analysis"""
-        # 确保所有输入都是字符串类型
+        # ensure all inputs are string types
         source_language = str(source_language) if source_language is not None else ""
         target_language = str(target_language) if target_language is not None else ""
         code_content = str(code_content) if code_content is not None else ""
         
-        # 确保potential_issues是字符串列表
+        # ensure potential_issues is a list of strings
         safe_issues = []
         if potential_issues:
             for issue in potential_issues:
                 if issue is not None:
                     safe_issues.append(str(issue))
         
-        # 提取代码特征，用于生成更具体的计划
+        # extract code features, for generating more specific plan
         code_features = self.extract_code_features(code_content)
         
-        # 创建一个更详细的计划模板，包括HPC特定的考虑因素
+        # create a more detailed plan template, including HPC-specific considerations
         planning_template = """Develop a comprehensive HPC code conversion plan based on the following analysis:
         Source Language: {{source_language}}
         Target Language: {{target_language}}
@@ -246,7 +250,7 @@ class AnalysisAgent:
         
         chain = PromptTemplate.from_template(planning_template, template_format="jinja2") | self.llm
         
-        # 调用LLM生成计划
+        # call LLM to generate plan
         plan = chain.invoke({
             "source_language": source_language,
             "target_language": target_language,
@@ -254,7 +258,7 @@ class AnalysisAgent:
             "potential_issues": safe_issues
         })
         
-        # 保存计划供后续使用
+        # save plan for later use
         self._save_plan_to_log(source_language, target_language, plan.content)
         
         print("Generated conversion plan:")
@@ -265,18 +269,18 @@ class AnalysisAgent:
         return plan.content
         
     def _save_plan_to_log(self, source_language: str, target_language: str, plan: str) -> None:
-        """将生成的计划保存到日志文件中以便后续分析和审查"""
+        """Save the generated plan to a log file for later analysis and review"""
         try:
-            # 创建logs目录
+            # create logs directory
             log_dir = Path("logs/plans")
             log_dir.mkdir(parents=True, exist_ok=True)
             
-            # 使用时间戳创建唯一文件名
+            # create unique filename with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"plan_{source_language}_to_{target_language}_{timestamp}.txt"
             filepath = log_dir / filename
             
-            # 保存计划
+            # save plan
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(f"CONVERSION PLAN: {source_language} TO {target_language}\n")
                 f.write(f"Generated: {datetime.now().isoformat()}\n\n")
@@ -287,7 +291,7 @@ class AnalysisAgent:
             print(f"Error saving plan to log: {e}")
 
     def extract_plan_for_phase(self, plan: str, phase_number: int) -> Dict[str, Any]:
-        """从计划中提取特定阶段的任务和策略"""
+        """Extract tasks and strategies for a specific phase from the plan"""
         phase_map = {
             1: "Foundation",
             2: "Parallelism", 
@@ -296,7 +300,7 @@ class AnalysisAgent:
         }
         phase_name = phase_map.get(phase_number, f"Phase {phase_number}")
         
-        # 查找阶段开始和结束位置
+        # find phase start and end positions
         phase_start = plan.find(f"[Phase {phase_number}:")
         if phase_start == -1:
             phase_start = plan.find(f"Phase {phase_number}:")
@@ -304,37 +308,37 @@ class AnalysisAgent:
         if phase_start == -1:
             return {"tasks": [], "phase_name": phase_name, "found": False}
             
-        # 查找下一个阶段的开始位置，或者计划结束
+        # find start of next phase or end of plan
         next_phase_start = plan.find(f"[Phase {phase_number+1}:", phase_start)
         if next_phase_start == -1:
             next_phase_start = plan.find(f"Phase {phase_number+1}:", phase_start)
             
         if next_phase_start == -1:
-            # 如果没有下一个阶段，查找VALIDATION或POTENTIAL CHALLENGES部分
+            # if there is no next phase, find VALIDATION or POTENTIAL CHALLENGES sections
             next_sections = ["VALIDATION", "POTENTIAL CHALLENGES", "CURRENT PHASE"]
             for section in next_sections:
                 pos = plan.find(section, phase_start)
                 if pos != -1 and (next_phase_start == -1 or pos < next_phase_start):
                     next_phase_start = pos
         
-        # 如果仍未找到结束位置，使用整个剩余文本
+        # if still no end position found, use the whole remaining text
         if next_phase_start == -1:
             next_phase_start = len(plan)
             
-        # 提取当前阶段的内容
+        # extract content of current phase
         phase_content = plan[phase_start:next_phase_start].strip()
         
-        # 提取任务列表
+        # extract task list
         tasks = []
         task_pattern = re.compile(r'- Task \d+\.\d+: (.*?)(?=\n- Task \d+\.\d+:|$)', re.DOTALL)
         task_matches = task_pattern.findall(phase_content)
         
         if not task_matches:
-            # 尝试更一般的模式
+            # try more general pattern
             task_pattern = re.compile(r'- (.*?)(?=\n-|$)', re.DOTALL)
             task_matches = task_pattern.findall(phase_content)
         
-        # 处理任务
+        # handle tasks
         for task in task_matches:
             tasks.append(task.strip())
             
@@ -368,6 +372,9 @@ class AnalysisAgent:
             "potential_issues": [],
             "task_description": None
         }
+        
+        # clean thinking process first
+        analysis_text = self._clean_thinking_process(analysis_text)
         
         current_section = None
         code_content_started = False
@@ -439,7 +446,25 @@ class AnalysisAgent:
         
         # Validation - ensure we have the mandatory fields
         if not parsed_data["source_lang"] or not parsed_data["target_lang"]:
-            raise ValueError("Missing required language fields")
+            # try some fallback mechanisms to extract from text
+            try:
+                if not parsed_data["source_lang"]:
+                    source_match = re.search(r"(?:from|in)\s+(\w+)(?:\s+code)?(?:\s+to|\s+into)", analysis_text, re.I)
+                    if source_match:
+                        parsed_data["source_lang"] = source_match.group(1)
+                
+                if not parsed_data["target_lang"]:
+                    target_match = re.search(r"(?:to|into)\s+(\w+)(?:\s+code)?", analysis_text, re.I)
+                    if target_match:
+                        parsed_data["target_lang"] = target_match.group(1)
+            except:
+                pass
+                
+            # if still not found, provide default values
+            if not parsed_data["source_lang"]:
+                parsed_data["source_lang"] = "C"  # default assume C
+            if not parsed_data["target_lang"]:
+                parsed_data["target_lang"] = "OpenMP"  # default assume OpenMP
         
         return parsed_data
     
@@ -599,3 +624,37 @@ class AnalysisAgent:
                 report.append(f"{category.upper()}:\n{feat_list}")
                 
         return "\n\n".join(report) if report else "No significant HPC features detected"
+
+    def _clean_thinking_process(self, text: str) -> str:
+        """
+        Remove thinking process markers like <think>...</think>
+        
+        Args:
+            text: text to clean
+            
+        Returns:
+            cleaned text
+        """
+        if not text:
+            return ""
+            
+        # remove <think>...</think> blocks
+        think_pattern = re.compile(r'<think>.*?</think>', re.DOTALL)
+        text = think_pattern.sub('', text).strip()
+        
+        # remove other common thinking markers
+        common_patterns = [
+            r'(?i)Let me think\s*:.*?\n\s*\n',      # "Let me think: ..."
+            r'(?i)I\'ll analyze this.*?\n\s*\n',    # "I'll analyze this..."
+            r'(?i)Let\'s analyze.*?\n\s*\n',        # "Let's analyze..."
+            r'(?i)First, I need to.*?\n\s*\n',      # "First, I need to..."
+            r'(?i)Step \d+:.*?\n\s*\n',             # "Step 1: ..."
+            r'(?i)My thinking:.*?\n\s*\n',          # "My thinking:..."
+            r'(?i)Hmm, .*?\n\s*\n',                 # "Hmm, ..."
+            r'(?i)Okay, .*?\n\s*\n'                 # "Okay, ..."
+        ]
+        
+        for pattern in common_patterns:
+            text = re.sub(pattern, '', text, flags=re.DOTALL)
+            
+        return text.strip()

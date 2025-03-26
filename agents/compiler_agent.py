@@ -108,8 +108,8 @@ class CompilerAgent:
         language = language.upper()
         print(f"\n=== COMPILING {language} CODE ===")
         
-        # 紧急修复printf语句跨行问题
-        # 这一步是最后的安全网，确保即使前面的清理步骤失败，这里也能捕获并修复问题
+        # emergency fix printf statement cross-line problem
+        # this step is the last safety net, ensuring that even if previous cleanup steps fail, it can catch and fix the problem
         code = self._emergency_fix_printf(code)
         
         # Print source code with line numbers for debugging
@@ -132,12 +132,12 @@ class CompilerAgent:
         # Compile the code
         print("\n--- COMPILATION PHASE ---")
         
-        # 修复这里的函数调用 - _compile_code方法需要正确定义或正确调用
+        # fix the function call here - _compile_code method needs to be properly defined or called correctly
         output_file = os.path.splitext(temp_file_path)[0]
         if platform.system() == "Windows":
             output_file += ".exe"
             
-        # 构建编译命令
+        # build compile command
         compile_cmd = self._build_compile_command(temp_file_path, output_file, language)
         if not compile_cmd:
             error_msg = f"Cannot compile {language} code - no suitable compiler found"
@@ -145,7 +145,7 @@ class CompilerAgent:
             print(f"ERROR: {error_msg}")
             return result
             
-        # 执行编译
+        # execute compilation
         try:
             print(f"Executing compilation command: {' '.join(compile_cmd)}")
             process = subprocess.run(
@@ -158,7 +158,7 @@ class CompilerAgent:
             compiler_output = process.stdout + process.stderr
             result["compiler_output"] = compiler_output
             
-            # 打印编译输出（用于调试）
+            # print compile output (for debugging)
             if compiler_output:
                 print("\n--- COMPILER OUTPUT START ---")
                 print(compiler_output)
@@ -715,47 +715,46 @@ class CompilerAgent:
         return code
     
     def _emergency_fix_printf(self, code: str) -> str:
-        """紧急修复printf语句中的跨行问题"""
         print("\n=== EMERGENCY PRINTF FIX ===")
         fixed_code = code
         
-        # 查找可能有问题的printf语句
+        # find potentially problematic printf statements
         printf_pattern = re.compile(r'(printf\s*\(\s*"[^"]*?)(\n)([^"]*")', re.DOTALL)
         if printf_pattern.search(fixed_code):
-            print("检测到可能有问题的printf语句，正在修复...")
+            print("Detected potentially problematic printf statements, fixing...")
             fixed_code = printf_pattern.sub(r'\1 \3', fixed_code)
             
-        # 更进一步检查引号不匹配的问题
+        # check for quote mismatches
         lines = fixed_code.split('\n')
         open_quotes = False
         fixed_lines = []
         
         for i, line in enumerate(lines):
-            # 如果这一行包含奇数个引号，表示引号状态发生了变化
+            # if this line contains an odd number of quotes, it indicates a change in quote state
             if line.count('"') % 2 == 1:
                 if open_quotes:
-                    # 如果已经有未闭合的引号，这一行应该能闭合它
+                    # if there is an unclosed quote, this line should close it
                     open_quotes = False
                 else:
-                    # 如果没有未闭合的引号，那么这一行开始了一个新的字符串
+                    # if there is no unclosed quote, this line starts a new string
                     if i < len(lines) - 1:
-                        # 检查下一行是否可能是字符串的一部分
+                        # check if the next line might be part of the string
                         next_line = lines[i+1]
                         if '"' in next_line and next_line.count('"') % 2 == 1:
-                            # 很可能是跨行字符串，尝试合并
-                            print(f"合并第{i+1}行和第{i+2}行的跨行字符串")
+                            # it is likely a cross-line string, try to merge
+                            print(f"Merging line {i+1} and line {i+2} of cross-line string")
                             combined_line = line + " " + next_line
                             fixed_lines.append(combined_line)
-                            i += 1  # 跳过下一行
+                            i += 1  # skip the next line
                             continue
                     open_quotes = True
             
-            # 处理普通行
+            # handle normal lines
             fixed_lines.append(line)
         
-        # 如果有未闭合的引号，尝试进行紧急修复
+        # if there is an unclosed quote, try to fix it
         if open_quotes:
-            print("警告: 代码中存在未闭合的引号！添加闭合引号以避免编译错误")
+            print("Warning: code contains unclosed quotes! Adding closing quote to avoid compilation errors")
             fixed_lines[-1] = fixed_lines[-1] + '"'
         
         fixed_code = '\n'.join(fixed_lines)
