@@ -18,6 +18,7 @@ from pathlib import Path
 import tempfile
 
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
 from langchain.schema.output_parser import StrOutputParser
 from langgraph.graph import StateGraph, END
@@ -46,7 +47,17 @@ class CodeTranslationGraph:
         Path(self.working_dir).mkdir(parents=True, exist_ok=True)
         
         # Initialize agents
-        self.llm = ChatOpenAI(temperature=0.9, model="gpt-4o-mini")
+        # self.llm = ChatOpenAI(temperature=0.9, model="gpt-4o-mini")
+        # self.llm = ChatOpenAI(model="o1-mini")
+
+        if not os.getenv("GROQ_API_KEY"):
+            print("Warning: GROQ_API_KEY is not set. Using default model.")
+        
+        self.llm = ChatGroq(
+            model="deepseek-r1-distill-llama-70b",
+            temperature=0.9,
+            api_key=os.getenv("GROQ_API_KEY")
+        )
         self.analysis_agent = AnalysisAgent(self.llm, self.knowledge_base)
         self.translation_agent = TranslationAgent(self.llm, self.knowledge_base)
         self.verification_agent = VerificationAgent(self.llm, self.knowledge_base)
@@ -264,94 +275,69 @@ class CodeTranslationGraph:
         print("===========================================")
         print("Start Analyze User Input")
         
-        user_input = state.get("user_input", "")
-        if not user_input:
-            error_msg = "EMPTY_USER_INPUT: No user input provided"
-            self._log_error(error_msg, state)
-            state["error"] = error_msg
-            state["source_language"] = "Unknown"
-            state["target_language"] = "Unknown"
-            state["code_content"] = ""
-            state["error_type"] = "input_error"
-            return state
-            
-        print(f"User input length: {len(user_input)} characters")
-        
         try:
-            # Advanced prompt-based analysis using Analysis Agent
+            # Extract user input from state
+            user_input = state.get("user_input", "")
+            if not user_input:
+                self._log_error("Empty user input", state)
+                return self._handle_error(state)
+                
+            # Use analysis agent to analyze user input
             result = self.analysis_agent.analyze_code(user_input)
             
-            # 调试输出分析结果
-            print("\nAnalysis Result:")
-            print(f"Validation Status: {result.get('is_validated', False)}")
+            # Check if analysis is validated
+            is_validated = result.get("is_validated", False)
             
-            if result.get("is_validated", False):
+            if is_validated:
+                # Extract parsed data
                 parsed_data = result.get("parsed_data", {})
-                source_language = parsed_data.get("source_language", "Unknown")
-                target_language = parsed_data.get("target_language", "Unknown")
-                code_content = parsed_data.get("code_content", "")
-                potential_issues = parsed_data.get("potential_issues", [])
                 
-                # 确保语言信息不为空
-                if source_language == "Unknown" or target_language == "Unknown":
-                    # 尝试使用回退策略
-                    print("Warning: Language information is incomplete. Using fallback extraction.")
-                    self._fallback_regex_extraction(state, user_input)
-                else:
-                    # 添加到状态中
-                    state["source_language"] = source_language
-                    state["target_language"] = target_language
-                    state["code_content"] = code_content
-                    state["potential_issues"] = potential_issues
-                    
-                    print(f"Extracted Source Language: {source_language}")
-                    print(f"Extracted Target Language: {target_language}")
-                    print(f"Extracted Code Length: {len(code_content)} characters")
-                    print(f"Identified Potential Issues: {len(potential_issues)}")
+                # 移除parsed_data中可能存在的思考过程
+                for key, value in parsed_data.items():
+                    if isinstance(value, str):
+                        # 移除<think>...</think>块
+                        parsed_data[key] = self._clean_thinking_process(value)
                 
-                # 即使分析成功，仍然执行回退策略以确保不会漏掉重要信息
-                if not code_content or not source_language or not target_language:
-                    print("Warning: Some critical information is missing. Using fallback extraction.")
-                    self._fallback_regex_extraction(state, user_input)
+                # Update state with parsed data
+                state.update(parsed_data)
+                
+                # Add potential issues to state
+                if "potential_issues" in parsed_data:
+                    state["potential_issues"] = parsed_data["potential_issues"]
+                
+                # Log step
+                self._log_step("analyze_user_input", 
+                              {"input_length": len(user_input)},
+                              {"result": "Analysis successful", "parsed_data": parsed_data})
+                              
+                print(f"Analysis successful:")
+                print(f"  Source language: {state.get('source_language', 'Unknown')}")
+                print(f"  Target language: {state.get('target_language', 'Unknown')}")
+                print(f"  Code length: {len(state.get('code_content', ''))}")
+                
+                return state
             else:
-                # 分析失败，使用正则表达式提取
-                print("Warning: Prompt-based analysis failed. Using regex extraction.")
+                # If validation fails, try regex extraction
+                print("Analysis validation failed, trying regex extraction")
+                
+                # Try regex extraction
                 self._fallback_regex_extraction(state, user_input)
                 
-                # 记录错误
-                if "error" in result:
-                    error_msg = f"ANALYSIS_FAILED: {result.get('error', 'Unknown error')}"
-                    self._log_error(error_msg, state)
-                    state["error_details"] = result.get("error")
-                
-            # 在这一步确保关键字段已赋予默认值
-            if "source_language" not in state or not state["source_language"]:
-                state["source_language"] = "Unknown"
-            if "target_language" not in state or not state["target_language"]:
-                state["target_language"] = "Unknown"
-            if "code_content" not in state:
-                state["code_content"] = ""
-                
-            # 记录分析结果
-            self._log_step("input_analyzed", state, {
-                "source_language": state.get("source_language", "Unknown"),
-                "target_language": state.get("target_language", "Unknown"),
-                "code_length": len(state.get("code_content", ""))
-            })
-            
+                if state.get("source_language") and state.get("target_language") and state.get("code_content"):
+                    # Regex extraction successful
+                    print("Regex extraction successful")
+                    self._log_step("analyze_user_input", 
+                                  {"input_length": len(user_input), "method": "regex"},
+                                  {"result": "Regex extraction successful"})
+                    return state
+                else:
+                    # Both analysis and regex extraction failed
+                    self._log_error("Failed to extract required information from user input", state)
+                    return self._handle_error(state)
+                    
         except Exception as e:
-            error_msg = f"INPUT_ANALYSIS_FAILED: {str(e)}"
-            self._log_error(error_msg, state, e)
-            state["error"] = error_msg
-            state["error_type"] = "analysis_error"
-            
-            # 确保关键字段已赋予默认值
-            state["source_language"] = "Unknown"
-            state["target_language"] = "Unknown"
-            state["code_content"] = ""
-        
-        print("===========================================")
-        return state
+            self._log_error(f"Error in user input analysis: {str(e)}", state)
+            return self._handle_error(state)
 
     def _fallback_regex_extraction(self, state: Dict, user_input: str) -> None:
         """Fallback method using regex if LLM extraction fails"""
@@ -432,19 +418,19 @@ class CodeTranslationGraph:
         print("===========================================")
         print("Start Generate Plan")
         
-        # 确保所有参数都是字符串类型
+        # ensure all parameters are string types
         source_language = str(state.get('source_language', '')) if state.get('source_language') is not None else ''
         target_language = str(state.get('target_language', '')) if state.get('target_language') is not None else ''
         code_content = str(state.get('code_content', '')) if state.get('code_content') is not None else ''
         
-        # 确保potential_issues是字符串列表
+        # ensure potential_issues is a list of strings
         potential_issues = []
         if 'potential_issues' in state and state['potential_issues'] is not None:
             for issue in state['potential_issues']:
                 if issue is not None:
                     potential_issues.append(str(issue))
         
-        # 检查是否有code_features，如果没有，尝试提取
+        # check if code_features exists, if not, try to extract
         if 'code_features' not in state and code_content:
             try:
                 code_features = self.analysis_agent.extract_code_features(code_content)
@@ -462,13 +448,13 @@ class CodeTranslationGraph:
             potential_issues=potential_issues
         )
         
-        # 存储完整的计划
+        # store full plan
         state["conversion_plan"] = plan
         
-        # 解析计划中的挑战和任务
+        # parse plan for challenges and tasks
         try:
-            # 提取当前阶段的任务
-            current_phase_num = state.get("iteration", 0) + 1  # 默认从第1阶段开始
+            # extract tasks for current phase
+            current_phase_num = state.get("iteration", 0) + 1  # default start from phase 1
             phase_data = self.analysis_agent.extract_plan_for_phase(plan, current_phase_num)
             
             if phase_data["found"]:
@@ -479,7 +465,7 @@ class CodeTranslationGraph:
                 for i, task in enumerate(phase_data["tasks"]):
                     print(f"  {i+1}. {task}")
             
-            # 提取潜在挑战
+            # extract potential challenges
             challenges_pattern = r"POTENTIAL CHALLENGES:(.*?)(?=CURRENT PHASE:|$)"
             challenges_match = re.search(challenges_pattern, plan, re.DOTALL)
             if challenges_match:
@@ -494,10 +480,10 @@ class CodeTranslationGraph:
         except Exception as e:
             print(f"Warning: Error parsing plan details: {e}")
         
-        # 记录生成计划的时间
+        # record time of plan generation
         state["plan_generated_time"] = datetime.now(timezone.utc).isoformat()
         
-        # 记录规划步骤
+        # record plan generation step
         self._log_step("plan_generated", state, {
             "plan_length": len(plan),
             "source_language": source_language,
@@ -508,74 +494,102 @@ class CodeTranslationGraph:
         return state
     
     def _initial_translation(self, state: Dict) -> Dict:
-        """Node to perform initial code translation"""
+        """Perform initial code translation"""
         print("===========================================")
         print("Start Initial Translation")
         
-        # Extract required fields
-        source_language = state.get("source_language", "")
-        target_language = state.get("target_language", "")
-        code_content = state.get("code_content", "")
-        
-        # Validate inputs
-        if not source_language or not target_language or not code_content:
-            error_msg = "Missing required fields for translation"
-            self._log_error(error_msg, state)
-            state["error"] = error_msg
-            return state
-        
-        # Check cache for existing translation
-        cache_key = self._generate_cache_key(code_content, target_language)
-        with self.cache_lock: 
-            if cache_key in self.translation_cache:
-                cached_result = self.translation_cache[cache_key]
-                state["translated_code"] = cached_result["code"]
-                state["cache_hit"] = True
-                self._log_step("translation_cache_hit", state, cached_result["metadata"])
-                print("Translation found in cache")
-                # 即使是缓存命中的代码，也保存起来以保持完整记录
-                self._save_translation_version(cached_result["code"], state)
-                return state
-        
-        # Perform translation
         try:
-            translated_code = self.translation_agent.translate_code(
-                source_language, target_language, code_content
-            )
+            # Extract required fields
+            source_language = state.get("source_language", "")
+            target_language = state.get("target_language", "")
+            code_content = state.get("code_content", "")
             
-            # Clean up the translated code - remove markdown code block markers
-            translated_code = self._clean_code_for_compilation(translated_code)
+            # Ensure we have required fields
+            if not source_language or not target_language or not code_content:
+                self._log_error("Missing required translation fields", state)
+                return self._handle_error(state)
             
-            # Update state
-            state["translated_code"] = translated_code
-            state["cache_hit"] = False
+            # Generate a cache key
+            cache_key = self._generate_cache_key(code_content, target_language)
             
-            # 保存初始翻译版本
-            self._save_translation_version(translated_code, state)
-            
-            # Cache the result
+            # Check if translation exists in cache
             with self.cache_lock:
-                self.translation_cache[cache_key] = {
-                    "code": translated_code,
-                    "metadata": {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "source_language": source_language,
-                        "target_language": target_language
-                    }
-                }
+                if cache_key in self.translation_cache:
+                    print("Using cached translation result")
+                    translation_result = self.translation_cache[cache_key]
+                    
+                    # Update state
+                    state["translated_code"] = translation_result
+                    state["iteration"] = 1  # First iteration from cache
+                    state["previous_versions"] = [{"code": translation_result, "iteration": 1}]
+                    
+                    # Log step
+                    self._log_step("initial_translation", 
+                                {"source": source_language, "target": target_language, "cache_hit": True},
+                                {"result": "Used cached translation"})
+                    
+                    return state
             
-            self._log_step("initial_translation_complete", state, {
-                "char_count": len(translated_code),
-                "line_count": translated_code.count('\n') + 1
-            })
+            # Perform translation
+            print(f"Translating from {source_language} to {target_language}")
+            try:
+                translated_code = self.translation_agent.translate_code(
+                    source_language=source_language,
+                    target_language=target_language,
+                    code_content=code_content
+                )
+                
+                # call _extract_code_from_result again to ensure clean code
+                if hasattr(self.translation_agent, '_extract_code_from_result'):
+                    translated_code = self.translation_agent._extract_code_from_result(translated_code)
+                else:
+                    # clean thinking process directly here
+                    translated_code = self._clean_thinking_process(translated_code)
+                
+                # ensure translation result is not empty
+                if not translated_code or len(translated_code.strip()) < 10:
+                    self._log_error("Translation returned empty or too short result", state)
+                    translated_code = f"// Failed to translate code\n// Source language: {source_language}\n// Target language: {target_language}\n\n{code_content}"
+                
+                # save cleaned code to cache
+                with self.cache_lock:
+                    self.translation_cache[cache_key] = translated_code
+                
+                # update state
+                state["translated_code"] = translated_code
+                state["iteration"] = 1
+                state["previous_versions"] = [{"code": translated_code, "iteration": 1}]
+                
+                # ensure conversion_plan field exists
+                if "conversion_plan" not in state or not state["conversion_plan"]:
+                    state["conversion_plan"] = f"Convert {source_language} code to {target_language}"
+                
+                # save translation version
+                self._save_translation_version(translated_code, state)
+                
+                # record step
+                self._log_step("initial_translation", 
+                            {"source": source_language, "target": target_language},
+                            {"result": "Translation successful"})
+                
+                print("Initial translation completed successfully")
+                
+            except Exception as e:
+                self._log_error(f"Error during translation: {str(e)}", state)
+                # provide a default translation result, so the workflow can continue
+                state["translated_code"] = f"// Error during translation: {str(e)}\n// Source language: {source_language}\n// Target language: {target_language}\n\n{code_content}"
+                state["iteration"] = 1
+                state["previous_versions"] = [{"code": state["translated_code"], "iteration": 1}]
+                
+                # ensure conversion_plan field exists
+                if "conversion_plan" not in state or not state["conversion_plan"]:
+                    state["conversion_plan"] = f"Convert {source_language} code to {target_language}"
+            
+            return state
             
         except Exception as e:
-            error_msg = f"Translation failed: {str(e)}"
-            self._log_error(error_msg, state, e)
-            state["error"] = error_msg
-        
-        print("===========================================")
-        return state
+            self._log_error(f"Unexpected error in initial translation: {str(e)}", state)
+            return self._handle_error(state)
 
     def _clean_code_for_compilation(self, code: str) -> str:
         """Clean code by removing markdown formatting and fixing compilation issues"""
@@ -591,8 +605,8 @@ class CodeTranslationGraph:
         # Remove any HTML-like comments that might have been added by the LLM
         code = re.sub(r'<!--.*?-->', '', code, flags=re.DOTALL)
         
-        # 修复特殊的printf语句跨行问题
-        # 1. 找到以printf开头，包含引号但没有结束引号的行
+        # fix special printf statement cross-line problem
+        # 1. find lines that start with printf, containing quotes but no closing quotes
         lines = code.split('\n')
         fixed_lines = []
         i = 0
@@ -601,20 +615,20 @@ class CodeTranslationGraph:
         while i < len(lines):
             line = lines[i]
             
-            # 检查是否是printf语句，并且包含奇数个引号（表示字符串未关闭）
+            # check if it is a printf statement, and contains odd number of quotes
             if ("printf" in line or "cout" in line) and line.count('"') % 2 == 1:
                 print(f"Found potentially broken printf at line {i+1}: {line}")
                 
-                # 合并下一行
+                # merge next line
                 if i + 1 < len(lines):
                     next_line = lines[i+1]
-                    # 如果下一行包含引号（可能是字符串的结束）
+                    # if the next line contains quotes
                     if '"' in next_line:
-                        # 合并两行，使用空格连接
+                        # merge two lines, using space to connect
                         combined = line.rstrip() + " " + next_line.lstrip()
                         fixed_lines.append(combined)
                         print(f"  Fixed by combining with next line: {combined}")
-                        i += 2  # 跳过下一行，因为已经合并了
+                        i += 2  # skip next line, because it has been merged
                         continue
             
             fixed_lines.append(line)
@@ -622,26 +636,26 @@ class CodeTranslationGraph:
         
         code = '\n'.join(fixed_lines)
         
-        # 使用更强大的正则表达式模式来修复换行的字符串
+        # use stronger regex pattern to fix string literals cross-line problem
         print("\n=== FIXING STRING LITERALS ===")
-        
-        # 修复带参数的printf语句（如"format", var）
+
+        # fix printf statements with parameters (e.g. "format", var)
         printf_pattern = r'(printf\s*\(\s*"[^"]*?)(\n)([^"]*"\s*,)'
         code = re.sub(printf_pattern, r'\1 \3', code)
         
-        # 修复一般的printf语句（如"message"）
+        # fix general printf statements (e.g. "message")
         printf_pattern2 = r'(printf\s*\(\s*"[^"]*?)(\n)([^"]*"\s*\))'
         code = re.sub(printf_pattern2, r'\1 \3', code)
         
-        # 修复字符串多行问题
+        # fix string multi-line problem
         string_pattern = r'("[^"]*?)(\n)([^"]*")'
         code = re.sub(string_pattern, r'\1 \3', code)
         
-        # 确保文件末尾有换行符
+        # ensure file ends with a newline
         if not code.endswith('\n'):
             code += '\n'
         
-        # 打印清理后的代码以便调试
+        # print cleaned code for debugging
         print("\n=== CLEANED CODE ===")
         for i, line in enumerate(code.split('\n')):
             print(f"{i+1:4d}: {line}")
@@ -682,7 +696,7 @@ class CodeTranslationGraph:
             }
             
         # Compile and run
-        # 直接使用我们已经清理过的代码，防止compiler_agent再次处理
+        # directly use the cleaned code, prevent compiler_agent from processing again
         try:
             compilation_result = self.compiler_agent.compile_and_run(
                 code=cleaned_code,
@@ -703,9 +717,9 @@ class CodeTranslationGraph:
         execution_output = compilation_result.get("execution_output", "")
         execution_time = compilation_result.get("execution_time")
         
-        # 如果编译成功，保存当前翻译版本
+        # if compilation succeeds, save current translation version
         if success:
-            # 创建一个包含代码和相关元数据的条目
+            # create an entry containing code and related metadata
             successful_entry = {
                 "code": cleaned_code,
                 "iteration": state.get("iteration", 0),
@@ -749,276 +763,205 @@ class CodeTranslationGraph:
         return state
     
     def _validate_code(self, state: Dict) -> Dict:
-        """Enhanced code validation with HPC-specific checks and compiler feedback"""
+        """Validate translated code against quality standards"""
         print("===========================================")
         print("Start Validation Code")
         
-        new_state = state.copy()
-        
-        # Pre-validation checks
-        required_keys = ["target_language", "translated_code", "conversion_plan"]
-        missing_keys = []
-        for key in required_keys:
-            if key not in new_state:
-                missing_keys.append(key)
-                
-        if missing_keys:
-            error_msg = f"VALIDATION_PARAM_MISSING: {', '.join(missing_keys)}"
-            self._log_error(error_msg, new_state)
-            new_state["error"] = error_msg
-            new_state["validation_result"] = f"验证失败: 缺少必要参数 - {', '.join(missing_keys)}"
-            new_state["validation_metadata"] = {
-                "classification": "error",
-                "severity": "high",
-                "priority": "immediate",
-                "violated_rules": ["MISSING_PARAMS"]
-            }
-            print(f"警告：验证缺少必要参数，但会继续流程: {missing_keys}")
-            return new_state
-        
-        # Add HPC-specific validation context
-        validation_context = {}
-        if "code_features" in state:
-            features = state["code_features"]
-            if "PARALLEL_CONSTRUCTS" in features:
-                validation_context["check_parallelism"] = True
-            if "MEMORY_OPERATIONS" in features:
-                validation_context["check_memory_patterns"] = True
-        
-        # Extract current phase from conversion plan
-        current_phase = self._get_current_phase(new_state)
-        
-        # Include compiler feedback in validation if available
-        validation_issues = state.get("potential_issues", []).copy()
-        if "compilation_result" in state:
-            comp_result = state["compilation_result"]
-            
-            # Add compilation errors to potential issues
-            if not comp_result.get("success", False):
-                for error in comp_result.get("errors", []):
-                    validation_issues.append(f"Compilation error: {error}")
-                
-                # Add compiler analysis suggestions
-                if "compiler_analysis" in state:
-                    analysis = state["compiler_analysis"]
-                    for issue in analysis.get("common_issues", []):
-                        validation_issues.append(f"Compiler issue: {issue}")
-                    for fix in analysis.get("suggested_fixes", []):
-                        validation_issues.append(f"Suggested fix: {fix}")
-            
-            # Add execution issues if compilation succeeded but execution had issues
-            elif "execution_analysis" in state:
-                exec_analysis = state["execution_analysis"]
-                if exec_analysis.get("contains_error", False):
-                    for issue in exec_analysis.get("correctness_issues", []):
-                        validation_issues.append(f"Runtime issue: {issue}")
-                    for issue in exec_analysis.get("performance_issues", []):
-                        validation_issues.append(f"Performance issue: {issue}")
-        
-        # Delegate to verification agent with enhanced context and compiler feedback
         try:
-            result = self.verification_agent.validate_code(
-                code=new_state["translated_code"],
-                target_language=new_state["target_language"],
-                current_phase=current_phase,
-                potential_issues=validation_issues,
-                iteration=new_state.get("iteration", 0)
-            )
+            # extract necessary fields, and provide default values
+            target_language = state.get("target_language", "Unknown")
+            translated_code = state.get("translated_code", "")
+            current_iteration = state.get("iteration", 1)
             
-            # Update state with validation metadata
-            new_state.update({
-                "validation_result": result["analysis"],
-                "validation_metadata": result["metadata"],
-                "validation_context": validation_context
-            })
+            # clean translated code, ensure no thinking process
+            if translated_code:
+                cleaned_code = self._clean_thinking_process(translated_code)
+                if cleaned_code != translated_code:
+                    print("Detected thinking process and cleaned it")
+                    state["translated_code"] = cleaned_code
+                    translated_code = cleaned_code
+            
+            # ensure conversion_plan field exists
+            if "conversion_plan" not in state or not state["conversion_plan"]:
+                source_language = state.get("source_language", "Unknown")
+                state["conversion_plan"] = f"Convert {source_language} code to {target_language}"
+            
+            # check missing parameters and emit warnings, but allow workflow to continue
+            missing_params = []
+            if not target_language or target_language == "Unknown":
+                missing_params.append("target_language")
+            if not translated_code:
+                missing_params.append("translated_code")
+            if "conversion_plan" not in state or not state["conversion_plan"]:
+                missing_params.append("conversion_plan")
+                
+            if missing_params:
+                error_msg = f"VALIDATION_PARAM_MISSING: {', '.join(missing_params)}"
+                self._log_error(error_msg, state)
+                print(f"Warning: validation missing necessary parameters, but workflow will continue: {missing_params}")
+            
+            # get current phase
+            current_phase = self._get_current_phase(state)
+            
+            # safely get validation result
+            try:
+                validation_result = self.verification_agent.validate_code(
+                    code=translated_code,
+                    target_language=target_language,
+                    current_phase=current_phase,
+                    potential_issues=state.get("potential_issues", []),
+                    iteration=current_iteration
+                )
+                
+                # clean validation result, if it contains thinking process
+                if isinstance(validation_result, dict) and "analysis" in validation_result:
+                    validation_result["analysis"] = self._clean_thinking_process(validation_result["analysis"])
+                
+                # update state
+                state["validation_result"] = validation_result["analysis"]
+                state["validation_metadata"] = validation_result["metadata"]
+                
+                # record step
+                self._log_step("validate_code", 
+                               {"code_length": len(translated_code), "target_language": target_language},
+                               {"result": "Validation completed", "metadata": validation_result["metadata"]})
+                
+                print("Validation completed successfully")
+                
+            except Exception as e:
+                error_msg = f"Error during code validation: {str(e)}"
+                self._log_error(error_msg, state)
+                print(f"Warning: {error_msg}")
+                
+                # set default validation result, so the workflow can continue
+                state["validation_result"] = "Validation failed due to technical issues"
+                state["validation_metadata"] = {
+                    "classification": "unknown",
+                    "severity": "medium",
+                    "priority": "deferred",
+                    "violated_rules": [],
+                    "solution_approach": "Address technical issues and try again"
+                }
+            
+            return state
+            
         except Exception as e:
-            error_msg = f"验证代码失败: {str(e)}"
-            self._log_error(error_msg, new_state, e)
-            
-            # 即使验证失败也提供默认的验证结果和元数据
-            new_state.update({
-                "validation_result": f"验证时出错: {str(e)}。错误类型: {type(e).__name__}",
-                "validation_metadata": {
-                    "classification": "error",
-                    "severity": "high",
-                    "priority": "immediate",
-                    "violated_rules": ["VALIDATION_ERROR"]
-                },
-                "validation_context": validation_context,
-                "error": error_msg
-            })
-            print("验证出错，但会继续流程并尝试改进代码")
-        
-        # Add compilation performance metrics if available
-        if "compilation_result" in state and state["compilation_result"].get("success", False):
-            perf_metrics = {
-                "execution_time": state["compilation_result"].get("execution_time"),
-                "performance_metrics": state["compilation_result"].get("performance_metrics", {})
-            }
-            new_state["validation_metadata"]["performance_metrics"] = perf_metrics
-        
-        self._log_step("validate_code", state, {
-            "validation_phase": current_phase,
-            "validation_context": validation_context,
-            "metadata": new_state["validation_metadata"],
-            "includes_compiler_feedback": "compilation_result" in state
-        })
-        
-        print("Validation Result:", new_state["validation_result"])
-        print("===========================================")
-        return new_state
+            self._log_error(f"Unexpected error in validation: {str(e)}", state)
+            return self._handle_error(state)
     
     def _improve_code(self, state: Dict) -> Dict:
-        """Node to improve code based on validation results"""
+        """Improve the translated code based on validation feedback"""
         print("===========================================")
         print("Start Code Improvement")
         
         try:
-            # Extract and convert required fields
-            validation_result = str(state.get("validation_result", "")) if state.get("validation_result") is not None else ""
-            translated_code = str(state.get("translated_code", "")) if state.get("translated_code") is not None else ""
-            target_language = str(state.get("target_language", "")) if state.get("target_language") is not None else ""
-            
-            # Debug information
-            print("===========================================")
-            print("Debug Information:")
-            print(f"Validation Result Type: {type(state.get('validation_result'))}")
-            print(f"Translated Code Type: {type(state.get('translated_code'))}")
-            print(f"Target Language Type: {type(state.get('target_language'))}")
-            print(f"Validation Metadata Type: {type(state.get('validation_metadata', {}))}")
-            print("===========================================")
-            
-            # Validate inputs
-            if not validation_result or not translated_code:
-                error_msg = "Missing validation result or code for improvement"
-                self._log_error(error_msg, state)
-                state["error"] = error_msg
-                return state
-            
-            # Extract metadata from validation
+            # Extract required information
+            translated_code = state.get("translated_code", "")
+            target_language = state.get("target_language", "")
+            validation_result = state.get("validation_result", "")
             validation_metadata = state.get("validation_metadata", {})
-            if not isinstance(validation_metadata, dict):
-                validation_metadata = {}
-                
-            classification = str(validation_metadata.get("classification", "unknown"))
-            severity = str(validation_metadata.get("severity", "medium"))
-            priority = str(validation_metadata.get("priority", "deferred"))
+            compilation_output = state.get("compilation_output", "")
+            compilation_errors = state.get("compilation_errors", [])
+            current_iteration = state.get("iteration", 1)
             
-            violated_rules = []
-            if "violated_rules" in validation_metadata:
-                raw_rules = validation_metadata["violated_rules"]
-                if isinstance(raw_rules, list):
-                    for rule in raw_rules:
-                        if rule is not None:
-                            violated_rules.append(str(rule))
-                elif raw_rules is not None:
-                    violated_rules.append(str(raw_rules))
+            # Get priority and severity
+            priority = validation_metadata.get("priority", "deferred")
+            severity = validation_metadata.get("severity", "medium")
             
-            # 打印调试信息
-            print("Validation Metadata Details:")
-            print(f"  Classification: {classification}")
-            print(f"  Severity: {severity}")
-            print(f"  Priority: {priority}")
-            print(f"  Violated Rules: {violated_rules}")
+            # Get relevant rules
+            violated_rules = validation_metadata.get("violated_rules", [])
+            relevant_rules = self._retrieve_relevant_rules(violated_rules, target_language)
+            
+            # Generate code diff if available
+            previous_versions = state.get("previous_versions", [])
+            code_diff = ""
+            if len(previous_versions) >= 2:
+                previous_code = previous_versions[-2]["code"]
+                code_diff = self._generate_code_diff(previous_code, translated_code)
+            
+            # Get compiler feedback
+            compiler_feedback = ""
+            if compilation_errors:
+                compiler_feedback = "\n".join(compilation_errors)
             
             # Get current phase
             current_phase = self._get_current_phase(state)
             
-            # Get relevant rules for violated rules
-            relevant_rules = self._retrieve_relevant_rules(violated_rules, target_language)
-            
-            # Generate code diff if we have previous versions
-            code_diff = ""
-            if state.get("previous_versions"):
-                previous_code = str(state["previous_versions"][-1]) if state["previous_versions"][-1] is not None else ""
-                code_diff = self._generate_code_diff(previous_code, translated_code)
-            
-            # Get compiler feedback if available
-            compiler_feedback = ""
-            if not state.get("compilation_success", True) and state.get("compilation_output"):
-                compiler_feedback = str(state.get("compilation_output", ""))
-                if state.get("compilation_error_analysis"):
-                    compiler_feedback += "\n\nError Analysis:\n"
-                    for issue in state.get("compilation_error_analysis", {}).get("common_issues", []):
-                        compiler_feedback += f"- {str(issue)}\n"
-                    for fix in state.get("compilation_error_analysis", {}).get("suggested_fixes", []):
-                        compiler_feedback += f"- Suggestion: {str(fix)}\n"
-            
-            # 保存当前版本的代码到文件
-            self._save_translation_version(translated_code, state)
-            
-            # Track previous version
-            if "previous_versions" not in state:
-                state["previous_versions"] = []
-            state["previous_versions"].append(translated_code)
-            
-            # Increment iteration counter
-            state["iteration"] = state.get("iteration", 0) + 1
-            
-            # Check if we've reached max iterations
-            if state["iteration"] >= self.max_iterations:
-                state["max_iterations_reached"] = True
-                self._log_step("max_iterations_reached", state, {
-                    "iterations": state["iteration"],
-                    "max_allowed": self.max_iterations
+            # Improve code
+            try:
+                improved_code = self.translation_agent.improve_code(
+                    code=translated_code,
+                    validation_result=validation_result,
+                    current_phase=current_phase,
+                    target_language=target_language,
+                    priority=priority,
+                    severity=severity,
+                    relevant_rules=relevant_rules,
+                    code_diff=code_diff,
+                    compiler_feedback=compiler_feedback
+                )
+                
+                # clean possible thinking process
+                improved_code = self._clean_thinking_process(improved_code)
+                
+                # Update state
+                state["translated_code"] = improved_code
+                state["iteration"] = current_iteration + 1
+                
+                # Add to previous versions
+                previous_versions.append({
+                    "code": improved_code,
+                    "iteration": current_iteration + 1
                 })
-                return state
+                state["previous_versions"] = previous_versions
+                
+                # Save new version
+                self._save_translation_version(improved_code, state)
+                
+                # Log step
+                self._log_step("improve_code", 
+                              {"iteration": current_iteration, "code_length": len(translated_code)},
+                              {"result": "Improvement successful", "new_length": len(improved_code)})
+                
+                print(f"Code improvement iteration {current_iteration} completed successfully")
+                
+            except Exception as e:
+                self._log_error(f"Error during code improvement: {str(e)}", state)
+                
+                # Increment iteration but keep the same code
+                state["iteration"] = current_iteration + 1
+                
+                # Add to previous versions (same code, but marked as new iteration)
+                previous_versions.append({
+                    "code": translated_code,
+                    "iteration": current_iteration + 1
+                })
+                state["previous_versions"] = previous_versions
+                
+                print(f"Code improvement failed, continuing with unchanged code")
             
-            # Improve the code
-            improved_code = self.translation_agent.improve_code(
-                code=translated_code,
-                validation_result=validation_result,
-                current_phase=current_phase,
-                target_language=target_language,
-                priority=priority,
-                severity=severity,
-                relevant_rules=relevant_rules,
-                code_diff=code_diff,
-                compiler_feedback=compiler_feedback
-            )
-            
-            # Clean up the improved code for compilation
-            improved_code = self._clean_code_for_compilation(str(improved_code) if improved_code is not None else "")
-        
-            # Update state
-            state["translated_code"] = improved_code
-            
-            # Log improvement
-            self._log_step("code_improved", state, {
-                "iteration": state["iteration"],
-                "char_count": len(improved_code),
-                "line_count": improved_code.count('\n') + 1,
-                "diff_size": len(code_diff)
-            })
+            return state
             
         except Exception as e:
-            error_msg = f"Code improvement failed: {str(e)}"
-            self._log_error(error_msg, state, e)
-            state["error"] = error_msg
-            print(f"Error details: {str(e)}")
-            import traceback
-            print("Stack trace:")
-            print(traceback.format_exc())
-        
-        print("===========================================")
-        return state
+            self._log_error(f"Unexpected error in code improvement: {str(e)}", state)
+            return self._handle_error(state)
     
     def _save_translation_version(self, code: str, state: Dict) -> None:
-        """保存翻译代码的每个版本到文件"""
+        """Save each version of translated code to a file"""
         if not code:
             return
             
         try:
-            # 创建版本目录
+            # create versions directory
             versions_dir = Path("logs/code_versions")
             versions_dir.mkdir(parents=True, exist_ok=True)
             
-            # 使用迭代号和时间戳创建唯一的文件名
+            # create unique filename with iteration number and timestamp
             iteration = state.get("iteration", 0)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             target_language = state.get("target_language", "unknown").lower()
             
-            # 为不同的目标语言设置不同的文件扩展名
+            # set different file extensions for different target languages
             file_extensions = {
                 "c": ".c",
                 "c++": ".cpp", 
@@ -1030,21 +973,21 @@ class CodeTranslationGraph:
                 "mpi": ".c"
             }
             
-            # 获取适当的文件扩展名，默认为.txt
+            # get appropriate file extension, default is .txt
             file_ext = file_extensions.get(target_language.lower(), ".txt")
             
-            # 创建文件名
+            # create filename
             filename = f"iteration_{iteration}_{timestamp}{file_ext}"
             file_path = versions_dir / filename
             
-            # 保存代码
+            # save code
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(code)
                 
-            # 添加元数据文件
+            # add metadata file
             metadata_file = versions_dir / f"iteration_{iteration}_{timestamp}_meta.json"
             
-            # 安全获取执行时间和编译状态
+            # safely get execution time and compilation status
             exec_time = state.get("execution_time_seconds")
             compilation_success = state.get("compilation_success", False)
             
@@ -1057,13 +1000,13 @@ class CodeTranslationGraph:
                 "execution_time": exec_time if exec_time is not None else "N/A"
             }
             
-            # 如果有编译错误，记录下来
+            # if there are compilation errors, record them
             if "compilation_errors" in state and state["compilation_errors"]:
                 metadata["compilation_errors"] = state["compilation_errors"]
                 
-            # 如果有执行输出，记录下来
+            # if there is execution output, record it
             if "execution_output" in state and state["execution_output"]:
-                # 限制输出长度，避免文件过大
+                # limit output length, avoid file too large
                 output = state["execution_output"]
                 if len(output) > 1000:
                     metadata["execution_output"] = output[:1000] + "... [truncated]"
@@ -1175,44 +1118,44 @@ class CodeTranslationGraph:
     
     def _should_improve(self, state: Dict) -> str:
         """Enhanced decision logic to determine if code should be improved"""
-        # 检查是否强制指定了继续迭代
+        # check if forced to continue iteration
         if state.get("force_improvement", False):
             return "continue"
         
-        # 检查是否已达到最大迭代次数
+        # check if maximum iterations reached
         if state.get("iteration", 0) >= self.max_iterations:
             return "max_iterations_reached"
             
-        # 检查编译是否成功 - 如果编译失败，继续改进代码而不是终止流程
+        # check if compilation is successful - if compilation failed, continue improving code instead of terminating workflow
         if not state.get("compilation_success", True):
-            return "improve"  # 修改: 返回"improve"而不是"compilation_failed"，继续改进代码
+            return "improve"  # modified: return "improve" instead of "compilation_failed", continue improving code
             
-        # 获取当前阶段的任务
+        # get current phase tasks
         current_phase_num = state.get("iteration", 0) + 1
         if "conversion_plan" in state:
             plan = state["conversion_plan"]
             phase_data = self.analysis_agent.extract_plan_for_phase(plan, current_phase_num)
             
-            # 如果存在下一阶段的任务，继续迭代
+            # if there are tasks for next phase, continue iteration
             if phase_data["found"] and phase_data["tasks"]:
                 return "tasks_remain"
                 
-        # 基于验证结果做决定
+        # based on validation result, decide if continue improving code
         severity = "unknown"
         if "validation_metadata" in state:
             metadata = state["validation_metadata"]
             severity = metadata.get("severity", "unknown").lower()
             classification = metadata.get("classification", "unknown").lower()
             
-            # 如果是严重或高优先级问题，继续改进
+            # if there are critical or high priority issues, continue improving code
             if severity in ["critical", "high"]:
                 return "critical_issues"
                 
-            # 如果是性能问题且我们正处于性能调优阶段，继续改进
+            # if there are performance issues and we are in performance tuning phase, continue improving code
             if classification == "performance" and current_phase_num >= 3:
                 return "performance_issues"
                 
-        # 如果没有严重问题，检查是否已完成当前阶段的所有任务
+        # if there are no critical issues, check if all tasks for current phase are completed
         if state.get("iteration", 0) < current_phase_num:
             return "phase_incomplete"
             
@@ -1220,11 +1163,11 @@ class CodeTranslationGraph:
     
     def _get_current_phase(self, state: Dict) -> str:
         """Get the current phase from the conversion plan based on iteration"""
-        # 如果已经有解析好的phase_name，直接使用
+        # if there is already parsed phase_name, use it directly
         if "current_phase_name" in state:
             return f"Phase {state.get('iteration', 0) + 1}: {state['current_phase_name']}"
             
-        # 否则基于迭代次数决定当前阶段
+        # otherwise, decide current phase based on iteration number
         iteration = state.get("iteration", 0)
         if iteration == 0:
             return "Phase 1: Foundation"
@@ -1333,7 +1276,7 @@ class CodeTranslationGraph:
             log_dir = Path("logs")
             log_dir.mkdir(exist_ok=True)
             
-            # 重置成功翻译列表
+            # reset successful translations list
             self.successful_translations = []
             
             # Run workflow using invoke method
@@ -1346,7 +1289,7 @@ class CodeTranslationGraph:
             # Add processing time to state
             final_state["processing_time"] = processing_time
             
-            # 确保即使有错误，基本字段也存在
+            # ensure even if there are errors, basic fields exist
             if "translated_code" not in final_state or not final_state.get("translated_code"):
                 final_state["translated_code"] = ""
                 
@@ -1362,10 +1305,10 @@ class CodeTranslationGraph:
                 else:
                     final_state["status"] = "unknown"
             
-            # 选择最佳翻译版本
-            # 如果有编译成功的版本，选择最新的一个
+            # select best translation version
+            # if there are successful translations, select the latest one
             if self.successful_translations:
-                best_translation = self.successful_translations[-1]  # 最新的成功版本
+                best_translation = self.successful_translations[-1]  # latest successful version
                 print(f"\nUsing successful compilation (iteration {best_translation['iteration']}) for final output")
                 final_state["translated_code"] = best_translation["code"]
                 final_state["compilation_success"] = True
@@ -1378,7 +1321,7 @@ class CodeTranslationGraph:
                 print("\nNo successful compilations found, using last translation attempt")
                 final_state["successful_translations_count"] = 0
             
-            # 将所有翻译版本添加到最终状态
+            # add all translations to final state
             if hasattr(self, 'successful_translations'):
                 final_state["all_successful_translations"] = self.successful_translations
             
@@ -1391,7 +1334,7 @@ class CodeTranslationGraph:
             print(f"Status: {final_state.get('status', 'unknown')}")
             print(f"Successful compilations: {len(self.successful_translations)}")
             
-            # 如果处理失败，尝试生成错误分析
+            # if processing failed, try to generate error analysis
             if final_state.get("status") == "failed" or "error" in final_state:
                 final_state = self._generate_error_analysis(final_state)
             
@@ -1466,7 +1409,7 @@ class CodeTranslationGraph:
             print(f"Error saving error log: {e}")
 
     def _generate_error_analysis(self, state: Dict) -> Dict:
-        """生成错误分析，帮助用户理解失败原因"""
+        """Generate error analysis to help user understand failure reasons"""
         print("===========================================")
         print("Generating Error Analysis")
         
@@ -1474,7 +1417,7 @@ class CodeTranslationGraph:
         error_type = state.get("error_type", "unspecified_error")
         
         try:
-            # 创建错误分析模板
+            # create error analysis template
             error_analysis_template = """Analyze the following error that occurred during code translation:
             Error Type: {{error_type}}
             Error Message: {{error_message}}
@@ -1513,11 +1456,11 @@ class CodeTranslationGraph:
             - [Approach 2]
             """
             
-            # 准备参数
+            # prepare parameters
             code_content = state.get("code_content", "")
             code_sample = code_content[:500] + "..." if len(code_content) > 500 else code_content
             
-            # 调用LLM生成错误分析
+            # call LLM to generate error analysis
             chain = PromptTemplate.from_template(error_analysis_template, template_format="jinja2") | self.llm
             
             error_analysis = chain.invoke({
@@ -1529,7 +1472,7 @@ class CodeTranslationGraph:
                 "code_content": bool(code_content)
             })
             
-            # 将分析结果添加到状态
+            # add analysis result to state
             state["error_analysis"] = error_analysis.content
             print("Error analysis generated")
             
@@ -1546,7 +1489,7 @@ class CodeTranslationGraph:
         print(" TRANSLATION RESULTS ".center(50, "="))
         print("=" * 50)
         
-        # 基本信息
+        # basic information
         source_language = state.get("source_language", "Unknown")
         target_language = state.get("target_language", "Unknown")
         processing_time = state.get("processing_time", 0)
@@ -1561,7 +1504,7 @@ class CodeTranslationGraph:
         print(f"Iterations        : {iteration}")
         print(f"Status            : {status}")
         
-        # 显示成功编译信息
+        # show successful compilation information
         if "successful_translations_count" in state:
             successful_count = state.get("successful_translations_count", 0)
             print(f"Successful Builds  : {successful_count}")
@@ -1570,30 +1513,30 @@ class CodeTranslationGraph:
                 selected_iteration = state.get("selected_translation_iteration", 0)
                 print(f"Selected Version  : Iteration #{selected_iteration}")
         
-        # 如果有错误，显示错误信息
+        # if there are errors, show error information
         if "error" in state:
             print("\nError Information")
             print("-" * 50)
             print(f"Error Type       : {state.get('error_type', 'Unknown')}")
             print(f"Error Message    : {state.get('error', 'Unknown error')}")
             
-            # 如果有错误分析，显示摘要
+            # if there is error analysis, show summary
             if "error_analysis" in state and state["error_analysis"]:
                 print("\nError Analysis Summary")
                 print("-" * 50)
                 error_analysis = state["error_analysis"]
-                # 显示错误分析的前300个字符
+                # show first 300 characters of error analysis
                 print(error_analysis[:300] + "..." if len(error_analysis) > 300 else error_analysis)
                 print("\nSee full error analysis in the detailed report")
         
-        # 显示代码结果
+        # show code result
         print("\n" + "=" * 50)
         print(" TRANSLATED CODE ".center(50, "="))
         print("=" * 50)
         
         translated_code = state.get("translated_code", "")
         if translated_code:
-            # 如果代码超过500行或10000个字符，只显示摘要
+            # if code is too large, only show summary
             code_lines = translated_code.splitlines()
             if len(code_lines) > 500 or len(translated_code) > 10000:
                 print(f"Code output is too large to display ({len(code_lines)} lines, {len(translated_code)} chars)")
@@ -1606,28 +1549,28 @@ class CodeTranslationGraph:
         else:
             print("Error: No translated code")
             
-        # 生成详细报告
+        # generate detailed report
         report_filename = self._generate_detailed_report(state)
         print(f"\nDetailed translation report saved to: {report_filename} ")
         
     def _generate_detailed_report(self, state: Dict) -> str:
-        """生成详细的翻译报告"""
-        # 创建logs目录
+        """Generate detailed translation report"""
+        # create logs directory
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
         
-        # 使用时间戳创建唯一的报告文件名
+        # create unique report filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"logs/translation_report_{timestamp}.txt"
         
         try:
             with open(filename, "w", encoding="utf-8") as f:
-                # 标题
+                # title
                 f.write("=" * 80 + "\n")
                 f.write("HPC CODE TRANSLATION DETAILED REPORT\n")
                 f.write("=" * 80 + "\n\n")
                 
-                # 基本信息
+                # basic information
                 f.write("BASIC INFORMATION\n")
                 f.write("-" * 80 + "\n")
                 f.write(f"Report Generated    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -1637,7 +1580,7 @@ class CodeTranslationGraph:
                 f.write(f"Iterations          : {state.get('iteration', 0)}\n")
                 f.write(f"Status              : {state.get('status', 'unknown')}\n")
                 
-                # 添加成功编译信息
+                # add successful compilation information
                 if "successful_translations_count" in state:
                     successful_count = state.get("successful_translations_count", 0)
                     f.write(f"Successful Builds    : {successful_count}\n")
@@ -1648,7 +1591,7 @@ class CodeTranslationGraph:
                 
                 f.write("\n")
                 
-                # 输入代码
+                # input code
                 f.write("INPUT CODE\n")
                 f.write("-" * 80 + "\n")
                 code_content = state.get("code_content", "")
@@ -1657,7 +1600,7 @@ class CodeTranslationGraph:
                 else:
                     f.write("No input code provided or extraction failed\n\n")
                 
-                # 翻译代码
+                # translated code
                 f.write("TRANSLATED CODE\n")
                 f.write("-" * 80 + "\n")
                 translated_code = state.get("translated_code", "")
@@ -1666,7 +1609,7 @@ class CodeTranslationGraph:
                 else:
                     f.write("No translated code generated\n\n")
                 
-                # 如果有多个成功编译的版本，添加摘要信息
+                # if there are multiple successful compilations, add summary information
                 if "all_successful_translations" in state and state["all_successful_translations"]:
                     f.write("SUCCESSFUL TRANSLATIONS SUMMARY\n")
                     f.write("-" * 80 + "\n")
@@ -1674,7 +1617,7 @@ class CodeTranslationGraph:
                         f.write(f"Version {idx+1} (Iteration {trans['iteration']}):\n")
                         f.write(f"  Timestamp: {trans['timestamp']}\n")
                         
-                        # 安全获取执行时间 - 避免None值导致的格式化错误
+                        # safely get execution time - avoid None value formatting error
                         exec_time = trans.get('execution_time')
                         if exec_time is not None:
                             f.write(f"  Execution Time: {exec_time:.4f} seconds\n")
@@ -1682,66 +1625,66 @@ class CodeTranslationGraph:
                             f.write(f"  Execution Time: N/A\n")
                         f.write("\n")
                 
-                # 如果有错误，显示错误信息
+                # if there are errors, show error information
                 if "error" in state:
                     f.write("ERROR INFORMATION\n")
                     f.write("-" * 80 + "\n")
                     f.write(f"Error Type          : {state.get('error_type', 'Unknown')}\n")
                     f.write(f"Error Message       : {state.get('error', 'Unknown error')}\n")
                     
-                    # 错误详情
+                    # error details
                     error_details = state.get("error_details", {})
                     if error_details:
                         f.write("\nError Details:\n")
                         for key, value in error_details.items():
                             f.write(f"- {key}: {value}\n")
                     
-                    # 完整的错误分析
+                    # full error analysis
                     if "error_analysis" in state and state["error_analysis"]:
                         f.write("\nERROR ANALYSIS\n")
                         f.write("-" * 80 + "\n")
                         f.write(state["error_analysis"] + "\n\n")
                 
-                # 编译结果
+                # compilation results
                 if "compilation_success" in state:
                     f.write("COMPILATION RESULTS\n")
                     f.write("-" * 80 + "\n")
                     f.write(f"Compilation Success : {state.get('compilation_success', False)}\n")
                     
-                    # 如果有编译错误
+                    # if there are compilation errors
                     compilation_errors = state.get("compilation_errors", [])
                     if compilation_errors:
                         f.write("\nCompilation Errors:\n")
                         for i, error in enumerate(compilation_errors):
                             f.write(f"{i+1}. {error}\n")
                     
-                    # 编译输出
+                    # compiler output
                     compiler_output = state.get("compilation_output", "")
                     if compiler_output:
                         f.write("\nCompiler Output:\n")
                         f.write(compiler_output + "\n")
                     
-                    # 执行输出
+                    # execution output
                     execution_output = state.get("execution_output", "")
                     if execution_output:
                         f.write("\nExecution Output:\n")
                         f.write(execution_output + "\n")
                         
-                    # 执行时间
+                    # execution time
                     execution_time = state.get("execution_time_seconds")
                     if execution_time is not None:
                         f.write(f"\nExecution Time: {execution_time:.4f} seconds\n")
                     else:
                         f.write("\nExecution Time: N/A\n")
                 
-                # 转换计划
+                # conversion plan
                 conversion_plan = state.get("conversion_plan", "")
                 if conversion_plan:
                     f.write("\nCONVERSION PLAN\n")
                     f.write("-" * 80 + "\n")
                     f.write(conversion_plan + "\n\n")
                 
-                # 性能分析
+                # performance analysis
                 if "performance_metrics" in state:
                     f.write("PERFORMANCE ANALYSIS\n")
                     f.write("-" * 80 + "\n")
@@ -1749,7 +1692,7 @@ class CodeTranslationGraph:
                     for key, value in metrics.items():
                         f.write(f"{key}: {value}\n")
                 
-                # 添加版本信息
+                # add version information
                 if "previous_versions" in state and state["previous_versions"]:
                     f.write("\nVERSION HISTORY\n")
                     f.write("-" * 80 + "\n")
@@ -1759,7 +1702,7 @@ class CodeTranslationGraph:
             return filename
         except Exception as e:
             print(f"Error generating detailed report: {e}")
-            # 尝试保存最基本的信息
+            # try to save basic information
             try:
                 with open(filename, "w", encoding="utf-8") as f:
                     f.write("ERROR GENERATING DETAILED REPORT\n")
@@ -1772,3 +1715,37 @@ class CodeTranslationGraph:
                 return filename
             except:
                 return "Failed to generate report"
+
+    def _clean_thinking_process(self, text: str) -> str:
+        """
+        Remove thinking process markers like <think>...</think>
+        
+        Args:
+            text: text to clean
+            
+        Returns:
+            cleaned text
+        """
+        if not text:
+            return ""
+            
+        # remove <think>...</think> blocks
+        think_pattern = re.compile(r'<think>.*?</think>', re.DOTALL)
+        text = think_pattern.sub('', text).strip()
+        
+        # remove other common thinking markers
+        common_patterns = [
+            r'(?i)Let me think\s*:.*?\n\s*\n',      # "Let me think: ..." 
+            r'(?i)I\'ll analyze this.*?\n\s*\n',    # "I'll analyze this..." 
+            r'(?i)Let\'s analyze.*?\n\s*\n',        # "Let's analyze..." 
+            r'(?i)First, I need to.*?\n\s*\n',      # "First, I need to..." 
+            r'(?i)Step \d+:.*?\n\s*\n',             # "Step 1: ..." 
+            r'(?i)My thinking:.*?\n\s*\n',          # "My thinking:..." 
+            r'(?i)Hmm, .*?\n\s*\n',                 # "Hmm, ..." 
+            r'(?i)Okay, .*?\n\s*\n'                 # "Okay, ..." 
+        ]
+        
+        for pattern in common_patterns:
+            text = re.sub(pattern, '', text, flags=re.DOTALL)
+            
+        return text.strip()
