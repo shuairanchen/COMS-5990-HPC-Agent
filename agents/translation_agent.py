@@ -24,7 +24,8 @@ class TranslationAgent:
         target_language = str(target_language) if target_language is not None else ""
         code_content = str(code_content) if code_content is not None else ""
         
-        translation_template = """You are an HPC code conversion expert. Convert this {{source_language}} code to {{target_language}}:
+        translation_template = """
+        You are an HPC code conversion expert. Convert this {{source_language}} code to {{target_language}}:
         Requirements:
         1. Maintain identical algorithmic logic
         2. Follow target language's performance best practices
@@ -120,7 +121,8 @@ class TranslationAgent:
             print(f"Current Phase Type: {type(current_phase)}")
             print("===========================================")
             
-            improvement_template = """Improve the code based on validation findings and compiler feedback while maintaining original functionality.
+            improvement_template = """
+            Improve the code based on validation findings and compiler feedback while maintaining original functionality.
             
             **Context**
             - Current Phase: {{current_phase}}

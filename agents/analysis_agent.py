@@ -32,14 +32,15 @@ class AnalysisAgent:
         target language and code content with improved robustness
         """
         # First, use a specialized prompt to extract key information
-        analysis_template = """You are a senior code analysis expert specializing in High Performance Computing.
+        analysis_template = """
+        You are a senior code analysis expert specializing in High Performance Computing.
         Analyze the following user input and extract key information:
         
         User input: {{user_input}}
         
         Perform these specific tasks in order:
-        1. Source Language Identification (must be a programming language, preferably C/C++/FORTRAN/CUDA/OpenMP/JAX)
-        2. Target Language Identification (must be a programming language, preferably C/C++/FORTRAN/CUDA/OpenMP/JAX)
+        1. Source Language Identification (must be a programming language, preferably C/C++/FORTRAN/CUDA/OpenMP/JAX/Pytorch)
+        2. Target Language Identification (must be a programming language, preferably C/C++/FORTRAN/CUDA/OpenMP/JAX/Pytorch)
         3. Code Segmentation: Extract ONLY the code block needing conversion
         4. Analyze potential conversion challenges for HPC (parallelism, memory, optimization)
         5. Generate a structured task description
@@ -164,7 +165,8 @@ class AnalysisAgent:
         code_features = self.extract_code_features(code_content)
         
         # create a more detailed plan template, including HPC-specific considerations
-        planning_template = """Develop a comprehensive HPC code conversion plan based on the following analysis:
+        planning_template = """
+        Develop a comprehensive HPC code conversion plan based on the following analysis:
         Source Language: {{source_language}}
         Target Language: {{target_language}}
         

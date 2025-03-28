@@ -13,18 +13,120 @@ from typing import Dict, Any, Optional, Tuple
 import platform
 import shutil
 from pathlib import Path
+from langchain.prompts import PromptTemplate
+from langchain.schema.output_parser import StrOutputParser
+import sys
 
 class CompilerAgent:
     """Agent responsible for compiling and executing translated code"""
     
-    def __init__(self, working_dir: Optional[str] = None):
+    def __init__(self, llm, working_dir: Optional[str] = None):
         """Initialize the compiler agent"""
+        self.llm = llm
         self.working_dir = working_dir or tempfile.mkdtemp()
         Path(self.working_dir).mkdir(parents=True, exist_ok=True)
         
         # Detect available compilers and tools
         self.compilers = self._detect_compilers()
         self.runtime_environments = self._detect_runtime_environments()
+    
+    def _select_compiler_with_llm(self, code: str, language: str, state: Dict = None) -> Dict[str, Any]:
+        prompt_template = """
+        As a compiler expert, please analyze the following code and select the most appropriate compiler.
+
+        Code language: {{language}}
+        
+        Code content:
+        ```
+        {{code}}
+        ```
+        
+        {% if state %}
+        Additional context information:
+        - Source language: {{state.get('source_language', 'Unknown')}}
+        - Optimization level: {{state.get('optimization_level', 'O2')}}
+        - Current phase: {{state.get('current_phase', 'Unknown')}}
+        {% endif %}
+
+        Available compilers:
+        {% for compiler, path in available_compilers.items() %}
+        - {{compiler}}: {{path}}
+        {% endfor %}
+
+        Please analyze the following aspects:
+        1. Code features (OpenMP, SIMD, CUDA, etc.)
+        2. Performance requirements
+        3. Platform compatibility
+        4. Compiler optimization capabilities
+
+        Please answer in the following format:
+        Selected compiler: [compiler name]
+        Compiler path: [path]
+        Reasoning: [detailed explanation]
+        Recommended compiler options: [list of options]
+        """
+
+        try:
+            # prepare template variables
+            template_vars = {
+                "language": language,
+                "code": code,
+                "state": state if state else {},
+                "available_compilers": self.compilers
+            }
+
+            # create prompt and call LLM
+            prompt = PromptTemplate(
+                template=prompt_template,
+                input_variables=["language", "code"],
+                partial_variables={
+                    "available_compilers": self.compilers,
+                    "state": state if state else {}
+                },
+                template_format="jinja2"
+            )
+            
+            chain = prompt | self.llm
+            result = chain.invoke(template_vars)
+            
+            # parse LLM's response
+            response = self._clean_thinking_process(result.content)
+            
+            # extract key information
+            compiler_name = None
+            compiler_path = None
+            compile_options = []
+            
+            for line in response.split('\n'):
+                if line.startswith('Selected compiler:'):
+                    compiler_name = line.split(':')[1].strip()
+                elif line.startswith('Compiler path:'):
+                    compiler_path = line.split(':')[1].strip()
+                elif line.startswith('Recommended compiler options:'):
+                    options_str = line.split(':')[1].strip()
+                    compile_options = [opt.strip() for opt in options_str.split() if opt.strip()]
+            
+            # verify if the selected compiler is available
+            if compiler_name and compiler_name in self.compilers:
+                return {
+                    "compiler_name": compiler_name,
+                    "compiler_path": self.compilers[compiler_name],
+                    "compile_options": compile_options,
+                    "success": True
+                }
+            else:
+                print(f"Warning: LLM selected compiler {compiler_name} is not available, using default compiler")
+                return {
+                    "success": False,
+                    "error": f"Selected compiler {compiler_name} is not available"
+                }
+            
+        except Exception as e:
+            print(f"Compiler selection process error: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     def _detect_compilers(self) -> Dict[str, str]:
         """Detect available compilers in the system"""
@@ -57,7 +159,8 @@ class CompilerAgent:
             "cuda": False,
             "openmp": False,
             "mpi": False,
-            "fortran": False
+            "fortran": False,
+            "jax": False 
         }
         
         # Check for CUDA
@@ -81,20 +184,26 @@ class CompilerAgent:
         if "gfortran" in self.compilers or "ifort" in self.compilers:
             environments["fortran"] = True
         
+        # Check for JAX
+        try:
+            import sys
+            import importlib.util
+            jax_spec = importlib.util.find_spec("jax")
+            jaxlib_spec = importlib.util.find_spec("jaxlib")
+            if jax_spec and jaxlib_spec:
+                # Check JAX version
+                try:
+                    import jax
+                    print(f"Detected JAX version: {jax.__version__}")
+                    environments["jax"] = True
+                except ImportError:
+                    pass
+        except Exception as e:
+            print(f"Error checking JAX installation: {str(e)}")
+        
         return environments
     
     def compile_and_run(self, code: str, language: str, timeout: int = 10) -> Dict[str, Any]:
-        """
-        Compile and run the translated code
-        
-        Args:
-            code: Source code to compile and run
-            language: Target language (C++, CUDA, FORTRAN, etc.)
-            timeout: Maximum execution time in seconds
-            
-        Returns:
-            Dictionary containing compilation and execution results, errors, and performance metrics
-        """
         result = {
             "success": False,
             "compiler_output": "",
@@ -103,6 +212,78 @@ class CompilerAgent:
             "execution_time": None,
             "performance_metrics": {}
         }
+        
+        # Standardize language name
+        language = language.upper()
+        print(f"\n=== COMPILING/RUNNING {language} CODE ===")
+        
+        # Add necessary import statements for JAX code
+        if language == "JAX" and "import jax" not in code:
+            # Check if code already has import statements
+            print("Adding necessary import statements for JAX code...")
+            imports = "import jax\nimport jax.numpy as jnp\nfrom jax import grad, jit, vmap\nimport numpy as np\n\n"
+            code = imports + code
+        
+        # for windows, changethe special characters
+        if platform.system() == "Windows":
+            # replace special characters in test
+            code = code.replace("✓", "[OK]")
+            code = code.replace("✗", "[ERROR]")
+            code = code.replace("²", "^2")
+            # replace other special characters
+            code = code.replace("…", "...")
+        
+        # Process code cleanup
+        code = self._clean_code_for_compilation(code)
+        
+        print("\n=== SOURCE CODE TO COMPILE/RUN ===")
+        for i, line in enumerate(code.split('\n')):
+            print(f"{i+1:4d}: {line}")
+        print("=== END OF SOURCE CODE ===\n")
+        
+        # use utf-8 encoding
+        try:
+            # Create temporary file with explicit UTF-8 encoding
+            if language in ["JAX", "PYTHON"]:
+                # For Python files, explicitly add encoding declaration
+                if not code.startswith("# -*- coding:"):
+                    code = "# -*- coding: utf-8 -*-\n" + code
+                
+            # Create temporary file
+            extension = self._get_file_extension(language)
+            fd, temp_file_path = tempfile.mkstemp(suffix=extension, dir=self.working_dir)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(code)
+            
+            if not os.path.exists(temp_file_path):
+                error_msg = "Failed to create temporary file"
+                result["errors"].append(error_msg)
+                print(f"ERROR: {error_msg}")
+                return result
+            
+            print(f"Created temporary file: {temp_file_path}")
+            print(f"Code length: {len(code)} characters")
+            
+            if language in ["JAX", "PYTHON"]:
+                print("\n--- Skipping compilation phase (interpreted language) ---")
+                result["success"] = True
+                result["executable"] = temp_file_path
+                
+                print("\n--- Execution phase ---")
+                run_result = self._run_code(temp_file_path, language, timeout)
+                result.update(run_result)
+                
+                # Clean up temporary files
+                self._cleanup_files(temp_file_path, None)
+                print("Temporary files cleaned up")
+                
+                print(f"=== Execution complete ===\n")
+                return result
+        except Exception as e:
+            error_msg = f"Error creating temporary file: {str(e)}"
+            result["errors"].append(error_msg)
+            print(f"ERROR: {error_msg}")
+            return result
         
         # Normalize language name
         language = language.upper()
@@ -208,9 +389,21 @@ class CompilerAgent:
         extension = self._get_file_extension(language)
         
         try:
-            # Create a temporary file with the appropriate extension
+            # Replace problematic Unicode characters in the code if on Windows
+            if platform.system() == "Windows":
+                # Replace check mark with "[OK]"
+                code = code.replace("✓", "[OK]")
+                # Replace "×" with "[ERROR]"
+                code = code.replace("✗", "[ERROR]")
+                # Replace "²" and other superscripts
+                code = code.replace("²", "^2")
+                code = code.replace("³", "^3")
+                # Replace other potential problematic characters
+                code = code.replace("…", "...")
+            
+            # Create a temporary file with the appropriate extension and proper encoding
             fd, temp_path = tempfile.mkstemp(suffix=extension, dir=self.working_dir)
-            with os.fdopen(fd, 'w') as f:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 f.write(code)
             return temp_path
         except Exception as e:
@@ -225,7 +418,9 @@ class CompilerAgent:
             "CUDA": ".cu",
             "FORTRAN": ".f90",  # Modern Fortran uses .f90 extension
             "OPENMP": ".cpp",   # OpenMP is typically used with C/C++
-            "MPI": ".cpp"       # MPI is typically used with C/C++
+            "MPI": ".cpp",      # MPI is typically used with C/C++
+            "JAX": ".py",       # JAX uses Python file extension
+            "PYTHON": ".py"     # Add support for normal Python
         }
         return extensions.get(language, ".txt")
     
@@ -304,10 +499,38 @@ class CompilerAgent:
             
         return state
     
-    def _build_compile_command(self, source_file: str, output_file: str, language: str) -> Optional[list]:
+    def _build_compile_command(self, source_file: str, output_file: str, language: str, state: Dict = None) -> Optional[list]:
         """Build the compilation command based on the language"""
         print(f"Building compilation command for {language} source file: {source_file}")
         
+        try:
+            with open(source_file, 'r') as f:
+                code_content = f.read()
+                
+            # use LLM to select compiler
+            compiler_selection = self._select_compiler_with_llm(code_content, language, state)
+            
+            if compiler_selection["success"]:
+                compiler_path = compiler_selection["compiler_path"]
+                compile_options = compiler_selection["compile_options"]
+                
+                # build basic compile command
+                cmd = [compiler_path, "-o", output_file, source_file]
+                
+                # add LLM recommended compile options
+                cmd.extend(compile_options)
+                
+                print(f"Using compiler: {compiler_selection['compiler_name']}")
+                print(f"Compile command: {' '.join(cmd)}")
+                
+                return cmd
+                
+        except Exception as e:
+            print(f"Error reading source file or building compile command: {str(e)}")
+        
+        print("Fallback to default compiler selection logic")
+        
+        # backup original compiler selection logic
         if language == "C":
             if "gcc" in self.compilers:
                 print(f"Using GCC compiler: {self.compilers['gcc']}")
@@ -358,7 +581,7 @@ class CompilerAgent:
         elif language == "FORTRAN":
             if "gfortran" in self.compilers:
                 print(f"Using GFortran compiler: {self.compilers['gfortran']}")
-                # 使用静态链接OpenMP库，并增加栈大小或使用堆分配
+                # use static link OpenMP library, and increase stack size or use heap allocation
                 if platform.system() == "Windows":
                     return [self.compilers["gfortran"], "-o", output_file, source_file, "-fopenmp", "-static", "-fstack-arrays"]
                 else:
@@ -440,6 +663,12 @@ class CompilerAgent:
         # Set up environment for execution
         env = os.environ.copy()
         
+        # For Python/JAX, ensure proper encoding
+        if language in ["JAX", "PYTHON"]:
+            # Set environment variable for UTF-8 on Windows
+            if platform.system() == "Windows":
+                env["PYTHONIOENCODING"] = "utf-8"
+        
         # For OpenMP, set the number of threads
         if language == "OPENMP" or language == "FORTRAN":
             num_threads = os.cpu_count() or 4
@@ -479,7 +708,7 @@ class CompilerAgent:
             
             # Print execution output for debugging
             print("\n--- EXECUTION OUTPUT START ---")
-            # print(result["execution_output"])
+            print(result["execution_output"])
             print("--- EXECUTION OUTPUT END ---\n")
             
             if process.returncode == 0:
@@ -508,6 +737,9 @@ class CompilerAgent:
         """Build the execution command based on the language"""
         print(f"Building run command for {language} executable: {executable}")
         
+        # Standardize language name
+        language = language.upper()
+        
         if language in ["C", "C++", "FORTRAN", "OPENMP"]:
             return [executable]
         
@@ -522,7 +754,12 @@ class CompilerAgent:
                 num_processes = os.cpu_count() or 4
                 return ["mpiexec", "-n", str(num_processes), executable]
         
-        print(f"ERROR: No suitable run command found for {language}")
+        elif language in ["PYTHON", "JAX"]:
+            # For Python/JAX code, use the Python interpreter to run
+            python_executable = sys.executable
+            return [python_executable, executable]
+        
+        print(f"Error: No suitable run command found for {language}")
         return None
     
     def _cleanup_files(self, source_file: Optional[str], executable: Optional[str]) -> None:
@@ -624,6 +861,22 @@ class CompilerAgent:
                 analysis["contains_error"] = True
                 analysis["error_types"].append("openmp_data_race")
                 analysis["correctness_issues"].append("Data race detected in parallel region")
+        
+        # JAX specific
+        if language == "JAX":
+            if "tracer error" in output.lower():
+                analysis["contains_error"] = True
+                analysis["error_types"].append("jax_tracer_error")
+                analysis["correctness_issues"].append("JAX tracer error, possibly using Python control flow in JIT compiled functions")
+            
+            if "no gpu/tpu found" in output.lower():
+                analysis["contains_error"] = False  # This is not an error, just a warning
+                analysis["performance_issues"].append("JAX did not detect GPU/TPU, using CPU")
+            
+            if "illegal memory access" in output.lower():
+                analysis["contains_error"] = True
+                analysis["error_types"].append("jax_memory_error")
+                analysis["correctness_issues"].append("JAX memory access error, possibly due to insufficient GPU memory or array out of bounds")
         
         return analysis
     
@@ -761,3 +1014,39 @@ class CompilerAgent:
         print("=== EMERGENCY FIX COMPLETE ===\n")
         
         return fixed_code
+    
+    def _clean_thinking_process(self, text: str) -> str:
+        """
+        Remove thinking process markers like <think>...</think>
+        
+        Args:
+            text: text to clean
+            
+        Returns:
+            cleaned text
+        """
+        if not text:
+            return ""
+            
+        # remove <think>...</think>
+        think_pattern = re.compile(r'<think>.*?</think>', re.DOTALL)
+        text = think_pattern.sub('', text).strip()
+        
+        # remove common thinking patterns
+        common_patterns = [
+            r'(?i)Let me think\s*:.*?\n\s*\n',      # "Let me think: ..." 
+            r'(?i)I\'ll analyze this.*?\n\s*\n',    # "I'll analyze this..."
+            r'(?i)Let\'s analyze.*?\n\s*\n',        # "Let's analyze..."
+            r'(?i)First, I need to.*?\n\s*\n',      # "First, I need to..."
+            r'(?i)Step \d+:.*?\n\s*\n',             # "Step 1: ..."
+            r'(?i)My thinking:.*?\n\s*\n',          # "My thinking:..."
+            r'(?i)Hmm, .*?\n\s*\n',                 # "Hmm, ..."
+            r'(?i)Okay, .*?\n\s*\n'                 # "Okay, ..."
+        ]
+        
+        for pattern in common_patterns:
+            text = re.sub(pattern, '', text, flags=re.DOTALL)
+            
+        return text.strip()
+
+    
