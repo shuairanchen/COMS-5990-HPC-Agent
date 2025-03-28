@@ -47,21 +47,21 @@ class CodeTranslationGraph:
         Path(self.working_dir).mkdir(parents=True, exist_ok=True)
         
         # Initialize agents
-        # self.llm = ChatOpenAI(temperature=0.9, model="gpt-4o-mini")
+        self.llm = ChatOpenAI(temperature=0.9, model="gpt-4o-mini")
         # self.llm = ChatOpenAI(model="o1-mini")
 
-        if not os.getenv("GROQ_API_KEY"):
-            print("Warning: GROQ_API_KEY is not set. Using default model.")
+        # if not os.getenv("GROQ_API_KEY"):
+        #     print("Warning: GROQ_API_KEY is not set. Using default model.")
         
-        self.llm = ChatGroq(
-            model="deepseek-r1-distill-llama-70b",
-            temperature=0.9,
-            api_key=os.getenv("GROQ_API_KEY")
-        )
+        # self.llm = ChatGroq(
+        #     model="deepseek-r1-distill-llama-70b",
+        #     temperature=0.9,
+        #     api_key=os.getenv("GROQ_API_KEY")
+        # )
         self.analysis_agent = AnalysisAgent(self.llm, self.knowledge_base)
         self.translation_agent = TranslationAgent(self.llm, self.knowledge_base)
         self.verification_agent = VerificationAgent(self.llm, self.knowledge_base)
-        self.compiler_agent = CompilerAgent(working_dir=self.working_dir)
+        self.compiler_agent = CompilerAgent(self.llm, working_dir=self.working_dir)
         
         # Set up caching
         self.translation_cache = {}
@@ -231,7 +231,7 @@ class CodeTranslationGraph:
         workflow.add_node("analyze_requirements", self._analyze_requirements)
         workflow.add_node("generate_plan", self._generate_plan_with_fallback)
         workflow.add_node("initial_translation", self._initial_translation)
-        workflow.add_node("compile_code", self._compile_code)  # New node for compilation
+        workflow.add_node("compile_code", self._compile_code)
         workflow.add_node("validate_code", self._validate_code)
         workflow.add_node("improve_code", self._improve_code)
         workflow.add_node("finalize_output", self._finalize_output)
@@ -242,7 +242,7 @@ class CodeTranslationGraph:
         workflow.add_edge("analyze_user_input", "analyze_requirements")
         workflow.add_edge("analyze_requirements", "generate_plan")
         workflow.add_edge("generate_plan", "initial_translation")
-        workflow.add_edge("initial_translation", "compile_code")  # Add compilation step
+        workflow.add_edge("initial_translation", "compile_code")
         workflow.add_edge("compile_code", "validate_code")
         
         # Set up the validation loop
@@ -253,12 +253,12 @@ class CodeTranslationGraph:
                 "improve": "improve_code",
                 "final": "finalize_output",
                 "complete": "finalize_output",
-                "max_iterations_reached": "finalize_output",  # 最大迭代次数到达时，转到finalize_output而不是error_handling
+                "max_iterations_reached": "finalize_output",  
                 "tasks_remain": "improve_code",
                 "critical_issues": "improve_code",
                 "performance_issues": "improve_code",
                 "phase_incomplete": "improve_code",
-                "error": "error_handling"  # 只有真正的错误才转到error_handling
+                "error": "error_handling"  
             }
         )
         workflow.add_edge("improve_code", "compile_code")  # Test improvements with compiler
@@ -292,10 +292,9 @@ class CodeTranslationGraph:
                 # Extract parsed data
                 parsed_data = result.get("parsed_data", {})
                 
-                # 移除parsed_data中可能存在的思考过程
+                # remove <think>...</think>
                 for key, value in parsed_data.items():
                     if isinstance(value, str):
-                        # 移除<think>...</think>块
                         parsed_data[key] = self._clean_thinking_process(value)
                 
                 # Update state with parsed data
@@ -304,6 +303,11 @@ class CodeTranslationGraph:
                 # Add potential issues to state
                 if "potential_issues" in parsed_data:
                     state["potential_issues"] = parsed_data["potential_issues"]
+                
+                # Ensure target language is correct
+                if state.get("target_language") == "Unknown" and "jax" in user_input.lower():
+                    print("Detected JAX keyword, correcting target language")
+                    state["target_language"] = "JAX"
                 
                 # Log step
                 self._log_step("analyze_user_input", 
@@ -322,6 +326,13 @@ class CodeTranslationGraph:
                 
                 # Try regex extraction
                 self._fallback_regex_extraction(state, user_input)
+                
+                # Ensure target language is correct
+                if (state.get("target_language") == "Unknown" or not state.get("target_language")) and "jax" in user_input.lower():
+                    print("After regex extraction, detected JAX keyword, correcting target language")
+                    state["target_language"] = "JAX"
+                    if "pytorch" in user_input.lower() or "torch" in user_input.lower():
+                        state["source_language"] = "PYTORCH"
                 
                 if state.get("source_language") and state.get("target_language") and state.get("code_content"):
                     # Regex extraction successful
@@ -668,16 +679,23 @@ class CodeTranslationGraph:
         print("===========================================")
         print("Start Compilation")
         
+        result_state = state.copy()
+        
         # Extract code and target language
         translated_code = str(state.get("translated_code", "")) if state.get("translated_code") is not None else ""
         target_language = str(state.get("target_language", "")) if state.get("target_language") is not None else ""
         
+        print(f"Target language: {target_language}")
+        print(f"Translated code: {translated_code}")
+
         if not translated_code or not target_language:
-            return {
+            result_state.update({
                 "compilation_success": False,
                 "compilation_errors": ["Missing code or target language"]
-            }
-            
+            })
+            print("Warning: missing code or target language, continue validation process")
+            return result_state
+        
         # Clean code for compilation
         cleaned_code = self._clean_code_for_compilation(translated_code)
         
@@ -689,11 +707,12 @@ class CodeTranslationGraph:
         
         # Skip compilation for languages that don't need it
         if not self._is_language_compilable(target_language):
-            return {
+            result_state.update({
                 "compilation_success": True,
                 "compilation_message": f"{target_language} does not require compilation",
                 "execution_output": "Execution not supported for this language"
-            }
+            })
+            return result_state
             
         # Compile and run
         # directly use the cleaned code, prevent compiler_agent from processing again
@@ -753,14 +772,14 @@ class CodeTranslationGraph:
             error_analysis = {}
             
         # Update state
-        state["compilation_success"] = success
-        state["compilation_errors"] = errors
-        state["compilation_output"] = compiler_output
-        state["execution_output"] = execution_output if success else ""
-        state["execution_time_seconds"] = execution_time
-        state["compilation_error_analysis"] = error_analysis
+        result_state["compilation_success"] = success
+        result_state["compilation_errors"] = errors
+        result_state["compilation_output"] = compiler_output
+        result_state["execution_output"] = execution_output if success else ""
+        result_state["execution_time_seconds"] = execution_time
+        result_state["compilation_error_analysis"] = error_analysis
             
-        return state
+        return result_state
     
     def _validate_code(self, state: Dict) -> Dict:
         """Validate translated code against quality standards"""
@@ -768,23 +787,29 @@ class CodeTranslationGraph:
         print("Start Validation Code")
         
         try:
-            # extract necessary fields, and provide default values
-            target_language = state.get("target_language", "Unknown")
-            translated_code = state.get("translated_code", "")
-            current_iteration = state.get("iteration", 1)
+            result_state = state.copy()
+            # print(f"Result state: {result_state}")
+            
+            target_language = str(result_state.get("target_language", "Unknown")) if result_state.get("target_language") is not None else "Unknown"
+            translated_code = str(result_state.get("translated_code", "")) if result_state.get("translated_code") is not None else ""
+            current_iteration = int(result_state.get("iteration", 1)) if result_state.get("iteration") is not None else 1
+            
+            print(f"Current iteration: {current_iteration}")
+            print(f"Target language: {target_language}")
+            print(f"Translated code: {translated_code}")
             
             # clean translated code, ensure no thinking process
             if translated_code:
                 cleaned_code = self._clean_thinking_process(translated_code)
                 if cleaned_code != translated_code:
                     print("Detected thinking process and cleaned it")
-                    state["translated_code"] = cleaned_code
+                    result_state["translated_code"] = cleaned_code
                     translated_code = cleaned_code
             
             # ensure conversion_plan field exists
             if "conversion_plan" not in state or not state["conversion_plan"]:
                 source_language = state.get("source_language", "Unknown")
-                state["conversion_plan"] = f"Convert {source_language} code to {target_language}"
+                result_state["conversion_plan"] = f"Convert {source_language} code to {target_language}"
             
             # check missing parameters and emit warnings, but allow workflow to continue
             missing_params = []
@@ -818,8 +843,8 @@ class CodeTranslationGraph:
                     validation_result["analysis"] = self._clean_thinking_process(validation_result["analysis"])
                 
                 # update state
-                state["validation_result"] = validation_result["analysis"]
-                state["validation_metadata"] = validation_result["metadata"]
+                result_state["validation_result"] = validation_result["analysis"]
+                result_state["validation_metadata"] = validation_result["metadata"]
                 
                 # record step
                 self._log_step("validate_code", 
@@ -834,8 +859,8 @@ class CodeTranslationGraph:
                 print(f"Warning: {error_msg}")
                 
                 # set default validation result, so the workflow can continue
-                state["validation_result"] = "Validation failed due to technical issues"
-                state["validation_metadata"] = {
+                result_state["validation_result"] = "Validation failed due to technical issues"
+                result_state["validation_metadata"] = {
                     "classification": "unknown",
                     "severity": "medium",
                     "priority": "deferred",
@@ -843,7 +868,7 @@ class CodeTranslationGraph:
                     "solution_approach": "Address technical issues and try again"
                 }
             
-            return state
+            return result_state
             
         except Exception as e:
             self._log_error(f"Unexpected error in validation: {str(e)}", state)

@@ -288,52 +288,55 @@ def main():
 
     print_section_header("USER INPUT")
     user_input = """
-    Please help me convert the following C code into OpenMP code, and ensure the code functionality is consistent:
-    #include <stdio.h>
-    #include <stdlib.h>
+    Please help me convert the following Pytorch code into JAX code, and ensure the code functionality is consistent:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
 
-    int dummyMethod1();
-    int dummyMethod2();
-    int dummyMethod3();
-    int dummyMethod4();
+    # Generate synthetic data
+    torch.manual_seed(42)
+    X = torch.rand(100, 1) * 10  # 100 data points between 0 and 10
+    y = 2 * X + 3 + torch.randn(100, 1)  # Linear relationship with noise
 
-    int main(int argc,char *argv[])
-    {
-    int i;
-    int x;
-    int len = 10000;
-    if (argc > 1) 
-        len = atoi(argv[1]);
-    dummyMethod1();
-    
-    //#pragma rose_outline
-    for (i = 0; i <= len - 1; i += 1) {
-        x = i;
-    }
-    dummyMethod2();
-    printf("x=%d",x);
-    return 0;
-    }
+    # Define the Linear Regression Model
+    class LinearRegressionModel(nn.Module):
+        def __init__(self):
+            super(LinearRegressionModel, self).__init__()
+            self.linear = nn.Linear(1, 1)  # Single input and single output
 
-    int dummyMethod1()
-    {
-    return 0;
-    }
+        def forward(self, x):
+            return self.linear(x)
 
-    int dummyMethod2()
-    {
-    return 0;
-    }
+    # Initialize the model, loss function, and optimizer
+    model = LinearRegressionModel()
+    criterion = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.01)
 
-    int dummyMethod3()
-    {
-    return 0;
-    }
+    # Training loop
+    epochs = 1000
+    for epoch in range(epochs):
+        # Forward pass
+        predictions = model(X)
+        loss = criterion(predictions, y)
 
-    int dummyMethod4()
-    {
-    return 0;
-    }
+        # Backward pass and optimization
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Log progress every 100 epochs
+        if (epoch + 1) % 100 == 0:
+            print(f"Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}")
+
+    # Display the learned parameters
+    [w, b] = model.linear.parameters()
+    print(f"Learned weight: {w.item():.4f}, Learned bias: {b.item():.4f}")
+
+    # Testing on new data
+    X_test = torch.tensor([[4.0], [7.0]])
+    with torch.no_grad():
+        predictions = model(X_test)
+        print(f"Predictions for {X_test.tolist()}: {predictions.tolist()}")
     """
     print(user_input)
     
