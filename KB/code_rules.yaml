@@ -3,7 +3,7 @@
 
 C:  
   memory_management:
-    - rule: "C-MEM-001"
+    - rule: "C-MEM-001 "
       desc: "Always pair malloc/calloc with free"
       error_pattern: "malloc|calloc(?!.*free\\()"
       example: |
