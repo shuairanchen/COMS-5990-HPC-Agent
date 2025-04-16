@@ -5,7 +5,7 @@ def read_file(fp):
     s1=f1.read()
     f1.close()
     return s1
-name_file='m4.py'
+name_file='m8.py'
 prediction_a = read_file('../set_A/'+name_file)
 prediction_b=read_file('../set_B/'+name_file)
 reference = read_file('../set_C_fixed_code/'+name_file)
