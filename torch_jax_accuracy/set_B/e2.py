@@ -1,77 +1,80 @@
 import jax
 import jax.numpy as jnp
-import pandas as pd
+from jax import grad, jit, random
 import optax
+import pandas as pd
 
-key = jax.random.PRNGKey(42)
-key, subkey = jax.random.split(key)
-X = jax.random.uniform(subkey, shape=(100, 1)) * 10 
-noise = jax.random.normal(key, shape=X.shape)
-y = 2 * X + 3 + noise  
+# Generate synthetic data
+key = random.PRNGKey(42)
+key, subkey = random.split(key)
+X = random.uniform(subkey, shape=(100, 1)) * 10  # 100 data points between 0 and 10
+key, subkey = random.split(key)
+noise = random.normal(subkey, shape=(100, 1))  # Noise
+y = 2 * X + 3 + noise  # Linear relationship with noise
 
+# Save the generated data to data.csv
 data = jnp.concatenate((X, y), axis=1)
 df = pd.DataFrame(data.numpy(), columns=['X', 'y'])
 df.to_csv('data.csv', index=False)
 
-class LinearRegressionDataset:
-    def __init__(self, csv_file):
-        self.data = pd.read_csv(csv_file)
-        self.X = jnp.array(self.data['X'].values, dtype=jnp.float32).reshape(-1, 1)
-        self.y = jnp.array(self.data['y'].values, dtype=jnp.float32).reshape(-1, 1)
-    
-    def __len__(self):
-        return len(self.data)
-    
-    def get_batch(self, batch_size):
-        idx = jax.random.permutation(key, self.X.shape[0])
-        for start in range(0, len(self.data), batch_size):
-            end = min(start + batch_size, len(self.data))
-            batch_idx = idx[start:end]
-            yield self.X[batch_idx], self.y[batch_idx]
-
+# Define the Linear Regression Model using a simple JAX function
 def model(params, x):
-    w, b = params
-    return jnp.dot(x, w) + b
+    return jnp.dot(x, params['w']) + params['b']
 
+# Loss function (Mean Squared Error)
 def loss_fn(params, x, y):
-    predictions = model(params, x)
-    return jnp.mean((predictions - y) ** 2)
+    preds = model(params, x)
+    return jnp.mean((preds - y) ** 2)
 
-def init_params():
-    key, subkey = jax.random.split(key)
-    w = jax.random.uniform(subkey, shape=(1, 1), minval=-1.0, maxval=1.0)
-    key, subkey = jax.random.split(key)
-    b = jax.random.uniform(subkey, shape=(1,), minval=-1.0, maxval=1.0)
-    return w, b
+# Gradient computation (Using JAX's grad)
+@jit
+def compute_gradient(params, x, y):
+    return grad(loss_fn)(params, x, y)
 
-@jax.jit
-def update(params, x, y, lr=0.01):
-    grads = jax.grad(loss_fn)(params, x, y)
-    w, b = params
-    new_params = (w - lr * grads[0], b - lr * grads[1])
-    return new_params
+# Training step with manual gradient update
+@jit
+def train_step(params, x, y, learning_rate=0.01):
+    grads = compute_gradient(params, x, y)
+    params['w'] -= learning_rate * grads['w']
+    params['b'] -= learning_rate * grads['b']
+    return params
 
-def train_model(dataset, epochs=1000, batch_size=32):
-    params = init_params()
-    for epoch in range(epochs):
-        for batch_X, batch_y in dataset.get_batch(batch_size):
-            params = update(params, batch_X, batch_y)
+# Training loop
+def train_model(X, y, num_epochs=1000, learning_rate=0.01):
+    key = random.PRNGKey(0)
+    key, subkey = random.split(key)
+    w = random.uniform(subkey, shape=(1, 1), minval=-1.0, maxval=1.0)
+    key, subkey = random.split(key)
+    b = random.uniform(subkey, shape=(1,), minval=-1.0, maxval=1.0)
+    params = {'w': w, 'b': b}
+
+    for epoch in range(num_epochs):
+        params = train_step(params, X, y, learning_rate)
 
         if (epoch + 1) % 100 == 0:
-            current_loss = loss_fn(params, batch_X, batch_y)
-            print(f"Epoch [{epoch + 1}/{epochs}], Loss: {current_loss:.4f}")
+            current_loss = loss_fn(params, X, y)
+            print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {current_loss:.4f}")
 
     return params
 
+# Main function
 def main():
-    dataset = LinearRegressionDataset('data.csv')
-    params = train_model(dataset)
+    # Load data
+    df = pd.read_csv('data.csv')
+    X_data = jnp.array(df['X'].values, dtype=jnp.float32).reshape(-1, 1)
+    y_data = jnp.array(df['y'].values, dtype=jnp.float32).reshape(-1, 1)
 
-    w, b = params
-    print(f"Learned weight: {w.item():.4f}, Learned bias: {b.item():.4f}")
+    # Train the model
+    learned_params = train_model(X_data, y_data)
 
+    # Display the learned parameters
+    learned_w = learned_params['w'][0, 0]
+    learned_b = learned_params['b'][0]
+    print(f"Learned weight: {learned_w:.4f}, Learned bias: {learned_b:.4f}")
+
+    # Testing on new data
     X_test = jnp.array([[4.0], [7.0]])
-    predictions = model(params, X_test)
+    predictions = model(learned_params, X_test)
     print(f"Predictions for {X_test.tolist()}: {predictions.tolist()}")
 
 if __name__ == "__main__":
