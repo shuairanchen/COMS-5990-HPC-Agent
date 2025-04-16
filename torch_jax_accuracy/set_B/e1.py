@@ -1,52 +1,67 @@
 import jax
 import jax.numpy as jnp
-from jax import random, grad, jit
 import optax
+from jax import random, grad, jit
+from flax import linen as nn
+import numpy as np
 
-class LinearRegressionModel:
-    def __init__(self, key):
-        key, subkey = random.split(key)
-        self.w = random.uniform(subkey, (1, 1), minval=-1.0, maxval=1.0)
-        key, subkey = random.split(key)
-        self.b = random.uniform(subkey, (1,), minval=-1.0, maxval=1.0)
-        self.params = {'w': self.w, 'b': self.b}
+# Generate synthetic data (similar to the PyTorch version)
+key = random.PRNGKey(42)
+key, subkey_X = random.split(key)
+X = random.uniform(subkey_X, shape=(100, 1)) * 10
+key, subkey_noise = random.split(key)
+noise = random.normal(subkey_noise, shape=(100, 1))
+y = 2 * X + 3 + noise
+
+# Define the Linear Regression Model
+class LinearRegressionModel(nn.Module):
+    def setup(self):
+        self.linear = self.param('linear', nn.initializers.xavier_uniform(), (1, 1))
 
     def __call__(self, x):
-        return jnp.dot(x, self.params['w']) + self.params['b']
+        return jnp.dot(x, self.linear)  # Output prediction
 
-def loss_fn(params, x, y):
-    preds = LinearRegressionModel(params)(x)
-    return jnp.mean((preds - y) ** 2)
+# Loss function: Mean Squared Error
+def loss_fn(params, inputs, targets, model):
+    predictions = model.apply(params, inputs)
+    return jnp.mean((predictions - targets) ** 2)
 
-@jit
-def update(params, x, y, learning_rate):
-    grads = grad(loss_fn)(params, x, y)
-    updated_params = {
-        'w': params['w'] - learning_rate * grads['w'],
-        'b': params['b'] - learning_rate * grads['b']
-    }
-    return updated_params
+# Gradient computation using JAX
+def compute_gradients(params, inputs, targets, model):
+    return grad(loss_fn)(params, inputs, targets, model)
 
-key = random.PRNGKey(42)
-key, subkey = random.split(key)
-X = random.uniform(subkey, (100, 1), minval=0.0, maxval=10.0)
-noise = random.normal(subkey, (100, 1))
-y = 2 * X + 3 + noise  
+# Training loop
+def update(params, inputs, targets, learning_rate=0.01):
+    grads = compute_gradients(params, inputs, targets, model)
+    new_params = {k: params[k] - learning_rate * grads[k] for k in params}
+    return new_params
 
-model = LinearRegressionModel(key)
+# Main function
+def main():
+    key = random.PRNGKey(42)
+    model = LinearRegressionModel()
 
-epochs = 1000
-learning_rate = 0.01
-for epoch in range(epochs):
-    model.params = update(model.params, X, y, learning_rate)
-    if (epoch + 1) % 100 == 0:
-        current_loss = loss_fn(model.params, X, y)
-        print(f"Epoch [{epoch + 1}/{epochs}], Loss: {current_loss:.4f}")
+    # Initialize model parameters
+    params = model.init(key, X)
 
-learned_w = model.params['w']
-learned_b = model.params['b']
-print(f"Learned weight: {learned_w[0, 0]:.4f}, Learned bias: {learned_b[0]:.4f}")
+    epochs = 1000
+    learning_rate = 0.01
 
-X_test = jnp.array([[4.0], [7.0]])
-predictions = model(X_test)
-print(f"Predictions for {X_test.tolist()}: {predictions.tolist()}")
+    # Training loop
+    for epoch in range(epochs):
+        params = update(params, X, y, learning_rate)
+        if (epoch + 1) % 100 == 0:
+            current_loss = loss_fn(params, X, y, model)
+            print(f"Epoch [{epoch+1}/{epochs}], Loss: {current_loss:.4f}")
+
+    # Output learned parameters
+    learned_weight = params['linear']
+    print(f"Learned weight: {learned_weight[0, 0]:.4f}")
+
+    # Testing on new data
+    X_test = jnp.array([[4.0], [7.0]])
+    predictions = model.apply(params, X_test)
+    print(f"Predictions for {X_test.tolist()}: {predictions.tolist()}")
+
+if __name__ == "__main__":
+    main()
