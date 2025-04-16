@@ -30,7 +30,7 @@ fop_input_A='../set_A/'
 fop_input_B='../set_B/'
 fop_input_C='../set_C_fixed_code/'
 fop_input_O='../set_O/'
-dir_path='../prompts/prompt_compare/'
+dir_path='../prompts/prompt_compare_reverse/'
 if not os.path.exists(dir_path):
     os.makedirs(dir_path)
     print(f"Directory '{dir_path}' created.")
@@ -41,7 +41,11 @@ list_files=sorted(glob(fop_input_C+'*.py'))
 for file in list_files:
     name=os.path.basename(file)
 
-    str_content= compare_msg_template.replace('{input}',read_file(fop_input_O+name)).replace('{translated code A}',read_file(fop_input_A+name)).replace('{translated code B}',read_file(fop_input_B+name))
+    # str_content= compare_msg_template.replace('{input}',read_file(fop_input_O+name)).replace('{translated code A}',read_file(fop_input_A+name)).replace('{translated code B}',read_file(fop_input_B+name))
+    str_content = compare_msg_template.replace('{input}', read_file(fop_input_O + name)).replace('{translated code A}',
+                                                                                                 read_file(
+                                                                                                     fop_input_B + name)).replace(
+        '{translated code B}', read_file(fop_input_A + name))
     f1=open(dir_path+name.replace('.py','.txt'),'w')
     f1.write(str_content)
     f1.close()
