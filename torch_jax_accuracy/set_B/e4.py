@@ -1,44 +1,92 @@
 import jax
 import jax.numpy as jnp
-from jax import grad, jit, random, vmap
 import optax
+import numpy as np
+import matplotlib.pyplot as plt
+from jax import random, grad, jit
 
-class LinearModel:
-    def __init__(self, key):
-        self.w = random.normal(key, (1,))
-        self.b = random.normal(key, ())
 
-    def __call__(self, x):
-        return jnp.dot(x, self.w) + self.b
+# Generate synthetic data
+def generate_data(num_samples=100):
+    key = random.PRNGKey(0)
+    X = jax.random.uniform(key, shape=(num_samples, 1)) * 10
+    key, subkey = random.split(key)
+    noise = random.normal(subkey, shape=(num_samples, 1))
+    y = 2 * X + 3 + noise
+    return X, y
 
-def loss_fn(model, x, y):
-    preds = model(x)
+
+# Define the Linear Regression Model
+def model(params, X):
+    return jnp.dot(X, params["w"]) + params["b"]
+
+
+# Loss function
+def loss_fn(params, X, y):
+    preds = model(params, X)
     return jnp.mean((preds - y) ** 2)
 
-def update(params, x, y, learning_rate=0.1):
-    w, b = params
-    loss_value, grads = jax.value_and_grad(loss_fn)(lambda x: model(x), x, y)
-    w -= learning_rate * grads[0]
-    b -= learning_rate * grads[1]
-    return w, b
 
-def train_model(key, model, x, y, epochs=100):
-    for epoch in range(epochs): 
-        model.w, model.b = update((model.w, model.b), x, y) 
-    return model
+# Gradient computation
+@jit
+def compute_gradient(params, X, y):
+    return grad(loss_fn)(params, X, y)
 
+
+# Training step
+@jit
+def train_step(params, X, y, lr=0.01):
+    grads = compute_gradient(params, X, y)
+    new_params = {
+        "w": params["w"] - lr * grads["w"],
+        "b": params["b"] - lr * grads["b"]
+    }
+    return new_params
+
+
+# Initialize model parameters
+def init_params(key):
+    bound = 1.0
+    key, subkey = random.split(key)
+    w = random.uniform(subkey, shape=(1, 1), minval=-bound, maxval=bound)
+    key, subkey = random.split(key)
+    b = random.uniform(subkey, shape=(1,), minval=-bound, maxval=bound)
+    return {"w": w, "b": b}
+
+
+# Main function
 def main():
-    key = random.PRNGKey(0)  
-    model = LinearModel(key)
+    key = random.PRNGKey(42)
+    X, y = generate_data(100)
 
-    x = jnp.array([[1.0], [2.0], [3.0]])
-    y = jnp.array([[2.0], [4.0], [6.0]])
+    # Initialize parameters
+    params = init_params(key)
 
-    model = train_model(key, model, x, y, epochs=100)
+    # Training loop
+    epochs = 1000
+    for epoch in range(epochs):
+        params = train_step(params, X, y, lr=0.01)
+        if (epoch + 1) % 100 == 0:
+            current_loss = loss_fn(params, X, y)
+            print(f"Epoch [{epoch + 1}/{epochs}], Loss: {current_loss:.4f}")
 
-    predictions = model(x)
-    print(f"Predictions for {x.tolist()}: {predictions.tolist()}")
-    print(f"Trained weights: {model.w}, bias: {model.b}")
+    # Display the learned parameters
+    learned_w = params["w"][0, 0]
+    learned_b = params["b"][0]
+    print(f"Learned weight: {learned_w:.4f}, Learned bias: {learned_b:.4f}")
+
+    # Plot the model fit to the train data
+    plt.figure(figsize=(4, 4))
+    plt.scatter(X, y, label='Training Data')
+    plt.plot(X, learned_w * X + learned_b, 'r', label='Model Fit')
+    plt.legend()
+    plt.show()
+
+    # Testing on new data
+    X_test = jnp.array([[4.0], [7.0]])
+    predictions = model(params, X_test)
+    print(f"Predictions for {X_test.tolist()}: {predictions.tolist()}")
+
 
 if __name__ == "__main__":
     main()

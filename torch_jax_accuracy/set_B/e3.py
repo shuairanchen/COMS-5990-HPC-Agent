@@ -1,74 +1,67 @@
 import jax
 import jax.numpy as jnp
-from jax import grad, jit, random
+from jax import random, grad
+from flax import linen as nn
 import optax
-import matplotlib.pyplot as plt
+from tensorboardX import SummaryWriter
+import numpy as np
 
-def generate_data(num_samples=100):
-    key = random.PRNGKey(42)
-    X = random.uniform(key, shape=(num_samples, 1)) * 10
-    noise = random.normal(key, shape=X.shape)
-    y = 2 * X + 3 + noise
-    return X, y
+# Linear regression model definition
+class LinearRegressionModel(nn.Module):
+    input_dim: int
 
-def custom_activation(x):
-    return jax.nn.tanh(x) + x
+    def setup(self):
+        self.w = self.param('w', nn.initializers.xavier_uniform(), (self.input_dim, 1))
+        self.b = self.param('b', nn.initializers.zeros, (1,))
 
-def model(params, x):
-    w, b = params['w'], params['b']
-    return custom_activation(jnp.dot(x, w) + b)
+    def __call__(self, x):
+        return jnp.dot(x, self.w) + self.b
 
-def loss_fn(params, x, y):
-    preds = model(params, x)
-    return jnp.mean((preds - y) ** 2)
+# Loss function
+def loss_fn(params, inputs, targets, model):
+    predictions = model.apply(params, inputs)
+    return jnp.mean((predictions - targets) ** 2)
 
-@jit
-def compute_gradients(params, x, y):
-    return grad(loss_fn)(params, x, y)
+# Jitted gradient computation using vectorization
+def compute_gradients(params, inputs, targets, model):
+    return grad(loss_fn)(params, inputs, targets, model)
 
-@jit
-def update(params, x, y, learning_rate=0.01):
-    grads = compute_gradients(params, x, y)
-    new_params = {
-        "w": params["w"] - learning_rate * grads["w"],
-        "b": params["b"] - learning_rate * grads["b"]
-    }
-    return new_params
+# Training function
+def train_model(model, inputs, targets, epochs=1000, learning_rate=0.01):
+    optimizer = optax.adam(learning_rate)
+    opt_state = optimizer.init(model)
 
-def train_model(X, y, num_epochs=1000, learning_rate=0.01):
-    key = random.PRNGKey(0)
-    key, subkey = random.split(key)
-    w = random.uniform(subkey, shape=(1, 1), minval=-1.0, maxval=1.0)
-    
-    key, subkey = random.split(key)
-    b = random.uniform(subkey, shape=(1,), minval=-1.0, maxval=1.0)
+    for epoch in range(epochs):
+        grads = compute_gradients(model.params, inputs, targets, model)
+        updates, opt_state = optimizer.update(grads, opt_state)
+        model.params = optax.apply_updates(model.params, updates)
 
-    params = {"w": w, "b": b}
+        if epoch % 100 == 0:
+            current_loss = loss_fn(model.params, inputs, targets, model)
+            print(f"Epoch {epoch}, Loss: {current_loss}")
 
-    for epoch in range(num_epochs):
-        params = update(params, X, y, learning_rate)
+    return model
 
-        if (epoch + 1) % 100 == 0:
-            loss_value = loss_fn(params, X, y)
-            print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss_value:.4f}")
-
-    return params
-
+# Main function
 def main():
-    X, y = generate_data(100)
-    learned_params = train_model(X, y)
-    w, b = learned_params["w"], learned_params["b"]
-    print(f"Learned weight: {w.item():.4f}, Learned bias: {b.item():.4f}")
+    # Generate synthetic data
+    key = random.PRNGKey(42)
+    key, subkey = random.split(key)
+    X = random.uniform(subkey, shape=(100, 2), minval=0.0, maxval=1.0) * 10
+    key, subkey = random.split(key)
+    noise = random.normal(subkey, shape=(100, 1))
+    y = (X[:, 0:1] + X[:, 1:2] * 2) + noise
 
-    plt.figure(figsize=(4, 4))
-    plt.scatter(X, y, label='Training Data')
-    plt.plot(X, w.item() * X + b.item(), 'r', label='Model Fit')
-    plt.legend()
-    plt.show()
+    # Initialize model
+    model = LinearRegressionModel(input_dim=2)
 
-    X_test = jnp.array([[4.0], [7.0]])
-    predictions = model(learned_params, X_test)
+    # Train the model
+    trained_model = train_model(model, X, y)
+
+    # Testing on new data
+    X_test = jnp.array([[4.0, 3.0], [7.0, 8.0]])
+    predictions = trained_model(X_test)
     print(f"Predictions for {X_test.tolist()}: {predictions.tolist()}")
 
 if __name__ == "__main__":
-    main()
+    main()  # Entry point of the program
