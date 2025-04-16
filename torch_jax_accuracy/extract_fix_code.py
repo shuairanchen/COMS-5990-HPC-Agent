@@ -1,7 +1,7 @@
 import json
 import os
 
-def extract_fix_code(json_path, output_dir="fixed_code"):
+def extract_fix_code(json_path, output_dir="set_C_fixed_code"):
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
