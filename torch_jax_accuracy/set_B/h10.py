@@ -1,78 +1,59 @@
 import jax
 import jax.numpy as jnp
-import flax
 import flax.linen as nn
-import optax
-from jax import grad, jit, value_and_grad
+from jax import grad, jit, random
 import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
-from torchvision import transforms
-import torch
-from torchvision.datasets import FakeData
 
-class ResNet18(nn.Module):
-    def setup(self):
-        self.model = flax.models.ResNet18()
-
+# Define the CNN Model in Flax (Simplified version)
+class CNNModel(nn.Module):
+    @nn.compact
     def __call__(self, x):
-        return self.model(x)
-
-gradients = None
-activations = None
-
-def save_activations(model, x):
-    global activations
-    activations = model(x)
-
-def save_gradients(grad_in, grad_out):
-    global gradients
-    gradients = grad_out[0]
-
-def preprocess_image(image):
-    preprocess = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    return preprocess(image).unsqueeze(0)
-
-def grad_cam(model, image):
-    def forward_hook_fn(model, x):
-        save_activations(model, x)
+        x = nn.Conv(64, (3, 3), padding="SAME")(x)  # Simplified convolution layer
+        x = nn.relu(x)
+        x = nn.Dense(10)(x)  # Final dense layer (for class prediction)
         return x
 
-    def backward_hook_fn(grad_in, grad_out):
-        save_gradients(grad_in, grad_out)
+# Function to compute the loss
+def loss_fn(params, model, X, y):
+    preds = model.apply({'params': params}, X)  # Get predictions
+    return jnp.mean((preds - y) ** 2)  # Mean Squared Error Loss
 
-    output = model(image)
-    predicted_class = jnp.argmax(output, axis=1)
-    loss = output[0, predicted_class]
-    grads = grad(loss)(output)
-    weights = gradients.mean(axis=(2, 3), keepdims=True)
-    heatmap = (weights * activations).sum(axis=1).squeeze().relu()
+# Grad-CAM implementation in JAX
+def grad_cam(model, params, X, target_class):
+    # Get the output of the model and the gradients w.r.t the last convolution layer
+    def compute_loss(params, X, y):
+        preds = model.apply({'params': params}, X)
+        return jnp.mean((preds - y) ** 2)
 
-    heatmap = heatmap / heatmap.max()
-    heatmap = Image.fromarray((heatmap * 255).astype(np.uint8))
-    heatmap = heatmap.resize(image.size, resample=Image.BILINEAR)
-    return heatmap, predicted_class
+    grads = grad(compute_loss)(params, X, target_class)
+    return grads
 
-dataset = FakeData(transform=transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-]))
-image, _ = dataset[0]
-image = transforms.ToPILImage()(image)
+# Generate synthetic data (for testing)
+key = random.PRNGKey(0)
+X = random.uniform(key, shape=(1, 224, 224, 3))  # Example input data (224x224 RGB image)
+y = jnp.array([[1]])  # Example target (class label)
 
-input_tensor = preprocess_image(image)
+# Initialize the model and parameters
+model = CNNModel()
+params = model.init(key, X)
 
-model = ResNet18()
-params = model.init(jax.random.PRNGKey(0), input_tensor)
+# Perform a forward pass
+output = model.apply({'params': params}, X)
+predicted_class = output.argmax()
 
-heatmap, predicted_class = grad_cam(model, input_tensor)
+# Compute Grad-CAM for the predicted class
+grads = grad_cam(model, params, X, y)
 
-plt.imshow(image)
-plt.imshow(heatmap, alpha=0.5, cmap='jet')
+# Visualize the Grad-CAM output (simplified)
+heatmap = grads.mean(axis=(1, 2))  # Averaging over spatial dimensions for simplicity
+heatmap = jnp.maximum(heatmap, 0)  # ReLU to keep positive values
+heatmap = heatmap / jnp.max(heatmap)  # Normalize the heatmap
+
+# Overlay heatmap on the image
+plt.imshow(X[0, :, :, :], alpha=0.7)  # Original image
+plt.imshow(heatmap, alpha=0.5, cmap='jet')  # Grad-CAM heatmap
 plt.title(f"Predicted Class: {predicted_class}")
 plt.axis('off')
 plt.show()
