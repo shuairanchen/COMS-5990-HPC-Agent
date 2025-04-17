@@ -59,6 +59,7 @@ for name_file in files:
     a_values = list(result_a_dict.values())
     b_values = list(result_b_dict.values())
 
+    # Calculate row-wise averages
     a_avg = np.mean(a_values)  # Average for A
     b_avg = np.mean(b_values)  # Average for B
 
@@ -76,6 +77,9 @@ for name_file in files:
 excel_path = 'codebleu_comparison_with_avg.xlsx'
 with pd.ExcelWriter(excel_path) as writer:
     for file_name, df in excel_data.items():
+        # Add a row for the averages
+        avg_row = pd.DataFrame([["Average"] + [np.mean(df[col]) for col in df.columns[1:]]], columns=df.columns)
+        df = pd.concat([df, avg_row], ignore_index=True)
         df.to_excel(writer, sheet_name=file_name)
 
 print(f"Excel file saved at: {excel_path}")
@@ -88,6 +92,9 @@ text_header = ["File"] + ["A - " + field for field in fields] + ["B - " + field 
 # Write to a text file in table format
 text_path = 'codebleu_comparison_with_avg.txt'
 with open(text_path, 'w') as f:
+    # Add row for averages in the text file
+    text_data.append(['Average'] + [np.mean([row[i] for row in text_data]) for i in range(1, len(text_data[0]))])
+
     f.write(tabulate([text_header] + text_data, headers="firstrow", tablefmt="grid"))
 
 print(f"Text file saved at: {text_path}")
