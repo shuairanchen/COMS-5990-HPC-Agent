@@ -228,6 +228,20 @@ def save_translation_report(result, output_file=None):
             f.write(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Total Processing Time: {result.get('processing_time', 0):.2f} seconds\n")
             
+            # add PyTorch-JAX rule application information
+            if "applied_pytorch_jax_rules" in result and result["applied_pytorch_jax_rules"]:
+                f.write("\nAPPLIED PYTORCH-JAX RULES\n")
+                f.write("-" * 80 + "\n")
+                rules = result["applied_pytorch_jax_rules"]
+                f.write(f"Total rules applied: {len(rules)}\n\n")
+                
+                for i, rule in enumerate(rules):
+                    similarity = rule.get('similarity', 0) * 100
+                    match_type = rule.get('match_type', 'N/A')
+                    f.write(f"Rule {i+1}: {rule.get('rule_id', 'Unnamed rule')} (Similarity: {similarity:.1f}%, Match type: {match_type})\n")
+                    f.write(f"  Error pattern: {rule.get('error_pattern', 'N/A')}\n")
+                    f.write(f"  Solution: {rule.get('solution', 'N/A')}\n\n")
+            
         print(f"\nDetailed translation report saved to: {output_file}")
         return output_file
         
@@ -247,6 +261,20 @@ def save_translation_report(result, output_file=None):
         except:
             print("Failed to save even basic report information")
             return "Failed to generate report"
+
+def print_applied_rules(applied_rules):
+    """Print applied PyTorch-JAX rules"""
+    if not applied_rules:
+        print("No specific PyTorch-JAX rules applied")
+        return
+    
+    print(f"\nApplied PyTorch-JAX rules  {len(applied_rules)} :")
+    for i, rule in enumerate(applied_rules):
+        similarity = rule.get('similarity', 0) * 100
+        match_type = rule.get('match_type', 'N/A')
+        print(f"\nRule {i+1}: {rule.get('rule_id', 'Unnamed rule')} (Similarity: {similarity:.1f}%, Match type: {match_type})")
+        print(f"   Error pattern: {rule.get('error_pattern', 'N/A')}")
+        print(f"   Solution: {rule.get('solution', 'N/A')}")
 
 def main():
     """Main entry point for the enhanced code translation system"""
@@ -287,30 +315,47 @@ def main():
     #         return 1
 
     print_section_header("USER INPUT")
+    # Pytorch to JAX Example
     user_input = """
     Please help me convert the following Pytorch code into JAX code, and ensure the code functionality is consistent:
     import torch
     import torch.nn as nn
     import torch.optim as optim
 
-    # Generate synthetic data
-    torch.manual_seed(42)
-    X = torch.rand(100, 1) * 10  # 100 data points between 0 and 10
-    y = 2 * X + 3 + torch.randn(100, 1)  # Linear relationship with noise
-
-    # Define the Linear Regression Model
-    class LinearRegressionModel(nn.Module):
-        def __init__(self):
-            super(LinearRegressionModel, self).__init__()
-            self.linear = nn.Linear(1, 1)  # Single input and single output
+    # Define a Transformer Model
+    class TransformerModel(nn.Module):
+        def __init__(self, input_dim, embed_dim, num_heads, num_layers, ff_dim, output_dim):
+            super(TransformerModel, self).__init__()
+            self.embedding = nn.Linear(input_dim, embed_dim)
+            encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=ff_dim)
+            self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+            self.output_layer = nn.Linear(embed_dim, output_dim)
 
         def forward(self, x):
-            return self.linear(x)
+            x = self.embedding(x)
+            x = self.transformer(x)
+            x = x.mean(dim=1)  # Pooling across the sequence
+            return self.output_layer(x)
+        
+    # Generate synthetic data
+    torch.manual_seed(42)
+    seq_length = 10
+    num_samples = 100
+    input_dim = 1
+    X = torch.rand(num_samples, seq_length, input_dim)  # Random sequences
+    y = torch.sum(X, dim=1)  # Target is the sum of each sequence
 
     # Initialize the model, loss function, and optimizer
-    model = LinearRegressionModel()
+    input_dim = 1
+    embed_dim = 16
+    num_heads = 2
+    num_layers = 2
+    ff_dim = 64
+    output_dim = 1
+
+    model = TransformerModel(input_dim, embed_dim, num_heads, num_layers, ff_dim, output_dim)
     criterion = nn.MSELoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     # Training loop
     epochs = 1000
@@ -328,16 +373,72 @@ def main():
         if (epoch + 1) % 100 == 0:
             print(f"Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}")
 
-    # Display the learned parameters
-    [w, b] = model.linear.parameters()
-    print(f"Learned weight: {w.item():.4f}, Learned bias: {b.item():.4f}")
-
     # Testing on new data
-    X_test = torch.tensor([[4.0], [7.0]])
+    X_test = torch.rand(2, seq_length, input_dim)
     with torch.no_grad():
         predictions = model(X_test)
         print(f"Predictions for {X_test.tolist()}: {predictions.tolist()}")
     """
+    # C to OpenMP Example
+    # user_input = """
+    # Please help me convert the following C code into OpenMP code, and ensure the code functionality is consistent:
+    # #include <stdlib.h>  
+    # #include <stdio.h>
+
+    # int dummyMethod1();
+    # int dummyMethod2();
+    # int dummyMethod3();
+    # int dummyMethod4();
+
+    # int main(int argc,char *argv[])
+    # {
+    # int i;
+    # int len = 100;
+    # int numNodes = len;
+    # int numNodes2 = 0;
+    # int x[100];
+    # // initialize x[]
+    # dummyMethod3();
+    
+    # for (i = 0; i <= len - 1; i += 1) {
+    #     if (i % 2 == 0) 
+    #     x[i] = 5;
+    #     else 
+    #     x[i] = - 5;
+    # }
+    # dummyMethod4();
+    # dummyMethod1();
+    
+    # for (i = numNodes - 1; i >= 0; i += -1) {
+    #     if (x[i] <= 0) {
+    #     numNodes2--;
+    #     }
+    # }
+    # dummyMethod2();
+    # printf("numNodes2 = %d\n",numNodes2);
+    # return 0;
+    # }
+
+    # int dummyMethod1()
+    # {
+    # return 0;
+    # }
+
+    # int dummyMethod2()
+    # {
+    # return 0;
+    # }
+
+    # int dummyMethod3()
+    # {
+    # return 0;
+    # }
+
+    # int dummyMethod4()
+    # {
+    # return 0;
+    # }
+    # """
     print(user_input)
     
     # Process user input if provided
@@ -355,10 +456,16 @@ def main():
     # Initialize translation graph
     print_section_header("INITIALIZING TRANSLATION SYSTEM")
     kb_path="KB/code_rules.yaml"
+    pytorch_jax_kb_path="KB/pytorch_jax_rules.json"  
     working_dir = "./compiler_temp"
-    translator = CodeTranslationGraph(kb_path=kb_path, working_dir=working_dir)
+    translator = CodeTranslationGraph(
+        kb_path=kb_path,
+        working_dir=working_dir,
+        pytorch_jax_kb_path=pytorch_jax_kb_path  
+    )
     translator.max_iterations = 3
     print(f"Knowledge base: {kb_path}")
+    print(f"PyTorch-JAX specific knowledge base: {pytorch_jax_kb_path}")
     print(f"Working directory: {working_dir}")
     print(f"Maximum iterations: {translator.max_iterations}")
     
@@ -391,6 +498,11 @@ def main():
 
     print_section_header("TRANSLATED CODE")
     print(result.get("translated_code", "Error: No translated code"))
+    
+    # show applied PyTorch-JAX rules
+    if "applied_pytorch_jax_rules" in result:
+        print_section_header("APPLIED PYTORCH-JAX RULES")
+        print_applied_rules(result.get("applied_pytorch_jax_rules", []))
     
     if "error_log" in result:
         print_section_header("ERROR LOG")

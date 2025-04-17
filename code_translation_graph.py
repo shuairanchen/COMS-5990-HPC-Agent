@@ -36,7 +36,8 @@ class CodeTranslationGraph:
     with improved error handling and performance monitoring
     """
     
-    def __init__(self, kb_path: Optional[str] = None, working_dir: Optional[str] = None):
+    def __init__(self, kb_path: Optional[str] = None, working_dir: Optional[str] = None, 
+                 pytorch_jax_kb_path: Optional[str] = None):
         """Initialize the code translation graph"""
         # Set up knowledge base
         self.kb_path = kb_path
@@ -84,6 +85,21 @@ class CodeTranslationGraph:
         
         # Build workflow
         self.workflow = self._build_workflow()
+        
+        # Load PyTorch-JAX specific knowledge base
+        self.pytorch_jax_knowledge = {}
+        if pytorch_jax_kb_path:
+            try:
+                with open(pytorch_jax_kb_path, 'r', encoding='utf-8') as f:
+                    self.pytorch_jax_knowledge = json.load(f)
+            except Exception as e:
+                print(f"Load PyTorch-JAX knowledge base failed: {str(e)}")
+        
+        # Add PyTorch-JAX knowledge base to main knowledge base
+        if self.pytorch_jax_knowledge:
+            if "pytorch_to_jax" not in self.knowledge_base:
+                self.knowledge_base["pytorch_to_jax"] = {}
+            self.knowledge_base["pytorch_to_jax"].update(self.pytorch_jax_knowledge)
     
     def _generate_cache_key(self, code: str, target_lang: str) -> str:
         """Generate a unique hash key for code snippet"""
@@ -913,57 +929,47 @@ class CodeTranslationGraph:
             current_phase = self._get_current_phase(state)
             
             # Improve code
-            try:
-                improved_code = self.translation_agent.improve_code(
-                    code=translated_code,
-                    validation_result=validation_result,
-                    current_phase=current_phase,
-                    target_language=target_language,
-                    priority=priority,
-                    severity=severity,
-                    relevant_rules=relevant_rules,
-                    code_diff=code_diff,
-                    compiler_feedback=compiler_feedback
-                )
-                
-                # clean possible thinking process
-                improved_code = self._clean_thinking_process(improved_code)
-                
-                # Update state
-                state["translated_code"] = improved_code
-                state["iteration"] = current_iteration + 1
-                
-                # Add to previous versions
-                previous_versions.append({
-                    "code": improved_code,
-                    "iteration": current_iteration + 1
-                })
-                state["previous_versions"] = previous_versions
-                
-                # Save new version
-                self._save_translation_version(improved_code, state)
-                
-                # Log step
-                self._log_step("improve_code", 
-                              {"iteration": current_iteration, "code_length": len(translated_code)},
-                              {"result": "Improvement successful", "new_length": len(improved_code)})
-                
-                print(f"Code improvement iteration {current_iteration} completed successfully")
-                
-            except Exception as e:
-                self._log_error(f"Error during code improvement: {str(e)}", state)
-                
-                # Increment iteration but keep the same code
-                state["iteration"] = current_iteration + 1
-                
-                # Add to previous versions (same code, but marked as new iteration)
-                previous_versions.append({
-                    "code": translated_code,
-                    "iteration": current_iteration + 1
-                })
-                state["previous_versions"] = previous_versions
-                
-                print(f"Code improvement failed, continuing with unchanged code")
+            improved_code, applied_rules = self.translation_agent.improve_code(
+                code=translated_code,
+                validation_result=validation_result,
+                current_phase=current_phase,
+                target_language=target_language,
+                priority=priority,
+                severity=severity,
+                relevant_rules=relevant_rules,
+                code_diff=code_diff,
+                compiler_feedback=compiler_feedback
+            )
+            
+            # save applied rules
+            if applied_rules:
+                if "applied_rules" not in state:
+                    state["applied_rules"] = []
+                state["applied_rules"].extend(applied_rules)
+            
+            # clean possible thinking process
+            improved_code = self._clean_thinking_process(improved_code)
+            
+            # Update state
+            state["translated_code"] = improved_code
+            state["iteration"] = current_iteration + 1
+            
+            # Add to previous versions
+            previous_versions.append({
+                "code": improved_code,
+                "iteration": current_iteration + 1
+            })
+            state["previous_versions"] = previous_versions
+            
+            # Save new version
+            self._save_translation_version(improved_code, state)
+            
+            # Log step
+            self._log_step("improve_code", 
+                          {"iteration": current_iteration, "code_length": len(translated_code)},
+                          {"result": "Improvement successful", "new_length": len(improved_code)})
+            
+            print(f"Code improvement iteration {current_iteration} completed successfully")
             
             return state
             
@@ -1083,6 +1089,10 @@ class CodeTranslationGraph:
                 hpc_analysis.append("Numerical calculation optimizations included")
             if hpc_analysis:
                 final_state["hpc_analysis"] = "\n".join(hpc_analysis)
+        
+        # Add rule application information to result
+        if "applied_rules" in state:
+            final_state["applied_pytorch_jax_rules"] = state["applied_rules"]
         
         # Log final step
         self._log_step("finalize_output", state, {
