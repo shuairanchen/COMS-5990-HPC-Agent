@@ -1,0 +1,384 @@
+
+# Example_id = "h6"
+
+Error Code
+nn.LSTMCell.initialize_carry(self.make_rng('lstm'), (batch_size,), self.hidden_size)
+
+Error
+TypeError: 'int' object is not subscriptable
+
+Fix Guide
+initialize_carry expects input_shape as a tuple of batch dimensions. Using (batch_size,) directly caused Flax to misinterpret batch_size as an integer, leading to the error. batch_dims ensures the correct tuple format.
+Fixed_Code: 
+def __call__(self, x, rng=None):
+lstm_out = LSTMStack(hidden_size=self.hidden_size, num_layers=self.num_layers)(x_embed, rng)
+jax.random.fold_in(rng, i) if rng is not None else jax.random.PRNGKey(0)
+def loss_fn(params, x, y, rng=None): 
+	preds = model.apply({'params': params}, x, rng=rng)
+batch_size = x.shape[0]
+        carry = nn.LSTMCell.initialize_carry(         
+            jax.random.PRNGKey(0),
+            (batch_size, self.embed_size)                          
+        )
+"""
+Error Code
+model = LanguageModel(vocab_size, embed_size, hidden_size, num_layers)
+
+Error
+__init__() takes 1 positional arguments but 5 were given
+
+Fix Guide
+flax.linen.Module classes are keyword‑only dataclasses, so every field has to be passed by name.
+Change the model construction line from positional to keyword arguments:
+Fixed_Code
+model = LanguageModel(
+    vocab_size=vocab_size,
+    embed_size=embed_size,
+    hidden_size=hidden_size,
+    num_layers=num_layers,
+)
+"""
+
+"""
+Error Code
+state = create_train_state(rng)
+lstm_cell = nn.scan(                                       # (B,T,H)
+            nn.LSTMCell,
+            variable_broadcast='params',
+            split_rngs={'params': False},
+            in_axes=1, out_axes=1, length=x.shape[1])(name='lstm')
+Error
+TypeError: ScanLSTMCell.__init__() missing 1 required positional argument: 'features'
+
+Fix Guide
+Add features=self.hidden_size to nn.LSTMCell inside the nn.scan call, using the hidden_size attribute to define the number of hidden units.
+"""
+
+
+"""
+Error Code
+lstm_cell = nn.scan(
+     nn.LSTMCell(features=self.hidden_size),
+     variable_broadcast='params',
+
+Error
+TransformTargetError: Linen transformations must be applied to Modules classes or functions taking a Module instance as the first argument. The provided target is not a Module class or callable: LSTMCell(
+    # attributes
+    features = 128
+    gate_fn = sigmoid
+    activation_fn = tanh
+    kernel_init = init
+    recurrent_kernel_init = init
+    bias_init = zeros
+    dtype = None
+    param_dtype = float32
+    carry_init = zeros
+
+Fix Guide
+Change nn.scan to use nn.LSTMCell class instead of instance, with features=self.hidden_size
+
+Fix
+lstm_cell = nn.scan(
+            nn.LSTMCell,
+            variable_broadcast='params',
+            split_rngs={'params': False},
+            in_axes=1, out_axes=1, length=x.shape[1])(features=self.hidden_size, name='lstm')
+        carry, lstm_out = lstm_cell(carry, emb)
+        last_h = lstm_out[:, -1, :]
+        logits = nn.Dense(self.vocab_size)(last_h)
+        probs  = nn.softmax(logits)
+        return logits, probs
+"""
+
+"""
+Error Code
+save_path = "quantised_language_model"
+checkpointer.save(save_path, quantised_params)  
+
+Error
+ValueError: Checkpoint path should be absolute. Got quantised_language_model.orbax-checkpoint-tmp-0
+
+Fix Guide
+Convert the relative path to an absolute path (probably not recommended)
+
+Fixed_Code
+save_path = os.path.abspath("quantised_language_model")
+checkpointer.save(save_path, quantised_params)
+
+"""
+######### -------------------------------
+# Example_id = "m4"
+
+"""
+Error Code
+x = nn.Conv(features=512,
+                    kernel_size=(7, 7),
+                    strides=(32, 32),
+                    padding='SAME',
+                    dimension_numbers=('NCHW', 'OIHW', 'NCHW'))(x)
+
+x = nn.Conv(features=64, kernel_size=(3, 3, 3), padding='SAME', dimension_numbers=dim3d)(x)
+
+Error
+TypeError: Conv.__init__() got an unexpected keyword argument 'dimension_numbers'
+
+Fix guide
+Remove dimentsion_numbers
+
+Fixed_Code
+x = nn.Conv(features=512,
+                    kernel_size=(7, 7),
+                    strides=(32, 32),
+                    padding='SAME')(x)
+x = nn.Conv(features=64, kernel_size=(3, 3, 3), padding='SAME')(x)
+"""
+
+"""
+Error Code
+(loss, pred), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+
+Error
+XlaRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 83886080000 bytes.
+
+Fix guide
+Reduce batch size
+
+Fixed_Code
+batch = 5
+"""
+
+######### -------------------------------
+# Example_id = "m1"
+
+"""
+Error Code
+carry = nn.LSTMCell.initialize_carry(self.make_rng("lstm"), (batch_size,), self.hidden_size)
+
+Error
+TypeError: 'int' object is not subscriptable
+
+Fix guide
+Change input_shape to (batch_size,), which correctly specifies the batch dimension. The feature dimension is not needed here, as nn.LSTMCell handles the input dimension (input_dim=1) via the input tensor inputs[:, t, :].
+
+Fixed_Code
+# carry = nn.LSTMCell.initialize_carry(self.make_rng("lstm"), (batch_size, input_dim), self.hidden_size)
+"""
+
+"""
+Error Code
+carry = nn.LSTMCell.initialize_carry(self.make_rng("lstm"), (batch_size, input_dim), self.hidden_size)
+
+Error 
+TypeError: 'int' object is not subscriptable
+
+Fix guide
+Replace nn.LSTMCell.initialize_carry with manual initialization of the LSTM carry state. The carry is a tuple (h, c) of hidden and cell states, each of shape (batch_size, hidden_size). Then use jax.random.normal to initialize these states, mirroring the behavior of initialize_carry.
+
+Fixed_Code
+carry = (
+    jax.random.normal(key1, (batch_size, self.hidden_size)),  # Hidden state
+    jax.random.normal(key2, (batch_size, self.hidden_size))   # Cell state
+        )
+"""
+
+"""Error Code
+lstm_cell = nn.LSTMCell()
+
+Error 
+TypeError: LSTMCell.__init__() missing 1 required positional argument: 'features'
+
+Fix guide
+Add features=self.hidden_size to nn.LSTMCell initialization
+
+Fixed_Code
+lstm_cell = nn.LSTMCell(features=self.hidden_size)
+"""
+
+
+######### -------------------------------
+# Example_id = "h10"
+"""
+Error Code
+features = model.extract_features({'params': params}, x)
+variables = model.init(key, dummy_input)
+
+Error
+ScopeCollectionNotFound: Tried to access "mean" from collection "batch_stats" in "/BatchNorm_0" but the collection is empty. (https://flax.readthedocs.io/en/latest/api_reference/flax.errors.html#flax.errors.ScopeCollectionNotFound)
+
+Fix Guide
+The model.init(key, dummy_input) call initializes params but does not load the pre-trained batch_stats required by BatchNorm layers in flaxmodels.ResNet18.When model.apply is called, it expects batch_stats in the variables dictionary, leading to the error since only {'params': params} is provided.
+What to do: Load the pre-trained flaxmodels.ResNet18 model with its full state (including params and batch_stats) using the flaxmodels API, and pass both to model.apply. The flaxmodels.ResNet18 documentation indicates that pre-trained weights include both params and batch_stats, which can be accessed via model.init with the pretrained=True flag or directly from the model's state.
+
+"""Error Code
+params = model.param_dict
+
+Error
+AttributeError: "ResNet" object has no attribute "param_dict". If "param_dict" is defined in '.setup()', remember these fields are only accessible from inside 'init' or 'apply'.
+
+Fix Guide
+model.param_dict is assumed to contain pre-trained weight,but flaxmodels.Reset18 managges pre-trained weights privately. Hence, use model.init with a dummy input to provide both params and batch_stats 
+
+Fixed_Code
+params = variables['params']
+"""
+
+Fixed_Code
+params = model.param_dict
+"""
+
+"""
+Error Code
+variables = model.init(key, dummy_input, mutable=['batch_stats'])
+params = variables['params']
+
+Error
+ScopeCollectionNotFound: Tried to access "kernel" from collection "params" in "/Conv_0" but the collection is empty. 
+
+Fix Guide
+Remove the model.init was used to initialize new parameters. Instead of that, load the pre-trained parameters and batch_stats directly from the flaxmodels.ResNet18 model's pretrained state. Use param_dict for pre-trained weights
+
+Fixed_Code
+variables = model.init(key, dummy_input, train=False)  # Set train=False for pretrained weights
+params = variables['params']
+batch_stats = variables.get('batch_stats', {})
+"""
+
+"""Error Code
+predicted_class = int(jnp.argmax(logits, axis=-1)[0])
+
+Error 
+TypeError: argmax requires ndarray or scalar arguments, got <class 'tuple'> at position 0
+
+Fix guide
+Update the forward pass to handle the tuple output from model.apply.
+Fixed_Code
+outputs = model.apply(
+    {'params': params, 'batch_stats': batch_stats}, input_tensor, mutable=['batch_stats'], train=False
+)
+logits = outputs[0]  # Extract logits from tuple
+predicted_class = int(jnp.argmax(logits, axis=-1)[0])
+print("Predicted class:", predicted_class)
+"""
+
+"""Error Code
+target_activation = feature_extractor(params, batch_stats, input_tensor)
+
+Error
+TypeError: feature_extractor() takes 2 positional arguments but 3 were given
+
+Fix guide
+Modify the feature_extractor function to accept batch_stats
+
+Fixed_Code
+def feature_extractor(params, batch_stats, x):
+"""
+
+"""Error Code
+features = model.extract_features(
+        {'params': params, 'batch_stats': batch_stats}, x, mutable=['batch_stats']
+    )[0]
+Error
+AttributeError: "ResNet" object has no attribute "extract_features". If "extract_features" is defined in '.setup()', remember these fields are only accessible from inside 'init' or 'apply'.
+
+Fix guide
+Fixed_Code
+PLEASE NOTE THAT THIS DOES NOT HAVE A FIX YET
+"""
+
+"""Error Code ## VERSION 2
+variables = model.init(rng, jnp.zeros((1, 3, 224, 224)))
+
+Error:
+TypeError: sub got incompatible shapes for broadcasting: (1, 3, 224, 224), (1, 1, 1, 3)
+
+Fix Guide
+flaxmodels’ ImageNet ResNet-18 expects channel-last inputs — shape (B, H, W, 3) — and inside the model the RGB mean is stored as (1, 1, 1, 3).Because the demo fed (1, 3, 224, 224) (PyTorch’s layout), JAX choked when it tried to subtract the two arrays and raised the Error. Apply the Fixed_Code.
+
+Fixed_Code 
+variables = model.init(rng, jnp.zeros((1, 224, 224, 3)))
+x = jnp.asarray(img_tensor.unsqueeze(0)       # add batch dim
+                             .permute(0, 2, 3, 1)  # CHW → HWC
+                             .numpy())
+weights = jnp.mean(grads, axis=(1, 2), keepdims=True)
+cam     = jnp.sum(weights * activations, axis=-1) 
+"""
+
+"""Error Code
+logits, activations = forward_apply(params, x, train=False, capture_fn=capture_conv2)
+logits, intermediates = model.apply({"params": params},x,
+
+Error
+TracerBoolConversionError: Attempted boolean conversion of traced array with shape bool[].
+The error occurred while tracing the function forward_apply at <ipython-input-1-5155d1869ec5>:43 for jit. This concrete value was not available in Python because it depends on the value of the argument train.
+
+Fix guide
+The error happens because the 'train' flag that we pass into forward_apply() is dynamic under jax.jit. Inside Flax, 'if train:' style checks decide whether batch-stat updates run, JAX needs that flag to be static. Marking it static in the jit decorator removes the trace error.
+"""
+
+"""Error Code
+logits, activations = forward_apply(params, x, train=False, capture_fn=capture_conv2)
+
+Error
+ScopeCollectionNotFound: Tried to access "mean" from collection "batch_stats" in "/BatchNorm_0" but the collection is empty. 
+
+Fix Guide
+Keep the batch_stats that come out of model.initPass them into every model.apply call (forward pass and the injection pass used inside score_fn). Mark the new positional indices in jax.jit as static for train and capture_fn.
+
+Fixed_Code
+params        = variables["params"]
+batch_stats   = variables["batch_stats"]
+def forward_apply(params, batch_stats, x, train, capture_fn):
+    logits, inter = model.apply(
+        {"params": params, "batch_stats": batch_stats}
+
+def replace(module, value):
+        if module.scope.path == TARGET_PATH:
+            return act
+        return value
+    new_logits = model.apply(
+        {"params": params, "batch_stats": batch_stats},
+"""
+
+"""Error Code (UNSOLVED)
+act_tree = intermediates[target_path]
+logits, activations = forward_apply(params, x, train=False, capture_fn=capture_conv2)
+
+Error
+KeyError: ('layer4_1', 'Conv_1')
+
+Fix Guide
+flaxmodels.ResNet18 uses a different layer path naming convention, and the capture_intermediates=True mechanism is not exposing the expected 512-channel convolutional layer.
+
+Fixed_Code: NO FIX
+"""
+
+"""Error Code
+x = nn.Dense(1000)(x)  # 1000 classes like ResNet
+
+Error
+receptive_field_size = math.prod(shape) / in_size / out_size / batch_size
+ZeroDivisionError: division by zero
+
+Fix guide
+Ensure the input to nn.Dense has a valid shape by adjusting the pooling or convolution layers.
+
+Fixed_Code
+x = nn.avg_pool(x, (3, 3), strides=(2, 2), padding='SAME')
+x = nn.avg_pool(x, (7, 7), padding='SAME')
+x = nn.Dense(1000, kernel_init=nn.initializers.normal(stddev=0.01))(x)
+"""
+
+"""Error Code
+heatmap = jnp.sum(weights * activations, axis=1).squeeze()
+
+Error
+TypeError: unsupported operand type(s) for *: 'ArrayImpl' and 'tuple'
+
+Fix guide
+activations is a tuple (likely from sow collecting intermediates), but weights * activations expects activations to be a JAX array. In the ResNet class, self.sow('intermediates', 'activations', x) collects activations as a tuple in state['intermediates']['activations'], causing the type mismatch. To fix this, To fix this, extract the correct JAX array from the activations tuple before performing the multiplication
+
+Fixed_Code
+heatmap = jnp.sum(weights * activations[0], axis=1).squeeze()
+"""
+
+
