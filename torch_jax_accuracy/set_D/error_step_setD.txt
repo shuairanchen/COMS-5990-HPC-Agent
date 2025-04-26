@@ -1,0 +1,382 @@
+# Example_id = "m1"
+
+"""Error Code
+params = model.init_params()
+
+Error
+AttributeError: 'LSTMModel' object has no attribute 'init_params'
+
+Fix Guide
+add an init_params method to initialize the model parameters
+
+Fixed_Code
+def init_params(self):
+        key = random.PRNGKey(0)
+        keys = random.split(key, 8)  # For all weights and biases
+        return {
+            'Wxi': random.normal(keys[0], (self.input_dim, self.hidden_units)),
+            'Whi': random.normal(keys[1], (self.hidden_units, self.hidden_units)),
+            'bi': jnp.zeros(self.hidden_units),
+            'Wxf': random.normal(keys[2], (self.input_dim, self.hidden_units)),
+            'Whf': random.normal(keys[3], (self.hidden_units, self.hidden_units)),
+            'bf': jnp.zeros(self.hidden_units),
+            'Wxo': random.normal(keys[4], (self.input_dim, self.hidden_units)),
+            'Who': random.normal(keys[5], (self.hidden_units, self.hidden_units)),
+            'bo': jnp.zeros(self.hidden_units),
+            'Wxc': random.normal(keys[6], (self.input_dim, self.hidden_units)),
+            'Whc': random.normal(keys[7], (self.hidden_units, self.hidden_units)),
+            'bc': jnp.zeros(self.hidden_units),
+        }
+"""
+
+"""Error Code
+C = F_t * C + I_t * C_tilde
+            H = O_t * jnp.tanh(C)
+params = train_model(params, X_seq, y_seq)
+
+Error
+NameError: name 'F_t' is not defined
+
+Fix Guide
+# Add other gate computations (F_t, O_t, C_tilde)
+
+Fixed_Code
+F_t = jax.nn.sigmoid(jnp.dot(X_t, params['Wxf']) + jnp.dot(H, params['Whf']) + params['bf'])
+# Output gate
+O_t = jax.nn.sigmoid(jnp.dot(X_t, params['Wxo']) + jnp.dot(H, params['Who']) + params['bo'])
+# Cell candidate
+C_tilde = jnp.tanh(jnp.dot(X_t, params['Wxc']) + jnp.dot(H, params['Whc']) + params['bc'])
+"""
+
+# Example_id = "m3"
+"""Error Code = None"""
+
+# Example_id = "m4"
+"""Error Code
+resnet_model = nn.Sequential(*[nn.Dense(512), nn.Dense(256)])
+
+Error
+TypeError: __init__() takes 2 positional arguments but 3 were given
+
+Fix Guide
+nn.Sequential in Flax expects a different syntax compared to PyTorch. In Flax, nn.Sequential takes a list of layers as a single argument, and it doesn't use the * unpacking operator
+Rewrite init function with a setup() function
+
+Fixed_Code
+ def setup(self):  # Fixed: Moved layer definitions to setup from __init__ for Flax compatibility
+        self.conv1 = nn.Conv(64, (3, 3, 3), padding='SAME')
+        self.conv2 = nn.Conv(64, (3, 3, 3), padding='SAME')
+        self.conv_transpose1 = nn.ConvTranspose(32, (1, 4, 4), strides=(1, 4, 4))
+        self.conv_transpose2 = nn.ConvTranspose(16, (1, 8, 8), strides=(1, 8, 8))
+        self.final_conv = nn.Conv(self.out_channel, (1, 1, 1))
+
+resnet_model = ResNetBackbone()
+
+class ResNetBackbone(nn.Module):
+    def setup(self):
+        self.dense1 = nn.Dense(512)
+        self.dense2 = nn.Dense(256)
+
+    def __call__(self, x):
+        x = self.dense1(x)
+        x = nn.relu(x)
+        x = self.dense2(x)
+        return x
+"""
+
+# Example_id = "m5"
+"""Error Code
+def rnn_model(params, x):
+    hidden = params['rnn_hidden']
+    output = jnp.dot(x, params['rnn_weights']) + hidden
+    def train_step(params, X, y, learning_rate=0.001):
+        grads = compute_gradient(params, X, y)
+Error
+TypeError: dot_general requires contracting dimensions to have the same shape, got (10,) and (1,).
+
+Fix Guide
+input x (shape (1, seq_length)) and params['rnn_weights'] (shape (input_dim, hidden_dim)) have incompatible dimensions for the dot product
+The current rnn_model applies a single linear transformation to the entire sequence, which is incorrect for sequential data.
+
+Fixed_Code
+# Fixed: Define a proper RNN model that processes sequences step-by-step
+def rnn_model(params, x, hidden_state):
+    """
+    Process input sequence step-by-step, updating hidden state.
+    x: shape (batch_size, seq_length, input_dim)
+    hidden_state: shape (batch_size, hidden_dim)
+    """
+    def step(carry, x_t):
+        h = carry
+        # Compute new hidden state: h_t = tanh(W_hh * h_{t-1} + W_xh * x_t + b_h)
+        h = jnp.tanh(
+            jnp.dot(h, params['rnn_hh']) +  # Hidden-to-hidden
+            jnp.dot(x_t, params['rnn_xh']) +  # Input-to-hidden
+            params['rnn_bias']
+        )
+        # Output: y_t = W_hy * h_t
+        y = jnp.dot(h, params['rnn_hy'])
+        return h, y
+def compute_gradient(params, X, y, hidden_state):
+    # Fixed: Include hidden_state in gradient computation
+    return grad(loss_fn)(params, X, y, hidden_state)
+
+def train_step(params, X, y, hidden_state, learning_rate=0.001):
+    # Fixed: Pass hidden_state to compute_gradient
+    grads = compute_gradient(params, X, y, hidden_state)
+    new_params = {
+        'rnn_xh': params['rnn_xh'] - learning_rate * grads['rnn_xh'],
+        'rnn_hh': params['rnn_hh'] - learning_rate * grads['rnn_hh'],
+        'rnn_hy': params['rnn_hy'] - learning_rate * grads['rnn_hy'],
+        'rnn_bias': params['rnn_bias'] - learning_rate * grads['rnn_bias']
+    }
+    return new_params
+
+def init_model(key, input_dim=1, hidden_dim=50, output_dim=1):
+    keys = random.split(key, 4)
+    params = {
+        # Fixed: Updated parameter structure for RNN
+        'rnn_xh': random.normal(keys[0], (input_dim, hidden_dim)),  # Input to hidden
+        'rnn_hh': random.normal(keys[1], (hidden_dim, hidden_dim)),  # Hidden to hidden
+        'rnn_hy': random.normal(keys[2], (hidden_dim, output_dim)),  # Hidden to output
+        'rnn_bias': random.normal(keys[3], (hidden_dim,))  # Bias for hidden state
+    }
+    # Fixed: Initialize hidden state separately
+    hidden_state = jnp.zeros((hidden_dim,))
+    return params, hidden_state
+
+for epoch in range(epochs):
+        for sequences, labels in zip(X_seq, y_seq):
+            # Fixed: Reshape to (batch_size, seq_length, input_dim)
+            sequences = sequences.reshape(1, sequence_length, 1)
+            # Fixed: Reshape labels to (batch_size, 1, output_dim)
+            labels = labels.reshape(1, 1, 1)
+"""
+
+"""Error Code
+hidden_state = jnp.repeat(hidden_state[None, :], batch_size, axis=0)
+
+Error
+IndexError: Too many indices: 0-dimensional array indexed with 1 regular index.
+
+Fix Guide
+reshape and repeat hidden_state for batch_size
+
+Fixed_Code
+hidden_state = jnp.repeat(jnp.expand_dims(hidden_state, 0), batch_size, axis=0)  # Shape (1, hidden_dim) -> (batch_size, hidden_dim)
+"""
+
+"""Error Code
+jnp.dot(h, params['rnn_hh']) +
+TypeError: tuple indices must be integers or slices, not str
+
+Fix Guide
+ensure params is always treated as a dictionary, modify the rnn_model function to accept params as a dictionary
+
+Fixed_Code
+# Fixed: Update loss_fn to pass params as tuple
+def loss_fn(params, X, y, hidden_state):
+    preds = rnn_model(params, X, hidden_state)
+    return jnp.mean((preds - y) ** 2)
+
+# Fixed: Update compute_gradient to pass params as tuple
+@jit
+def compute_gradient(params, X, y, hidden_state):
+    return grad(loss_fn)(params, X, y, hidden_state)
+
+# Fixed: Update train_step to handle params and grads as tuples
+@jit
+def train_step(params, X, y, hidden_state, learning_rate=0.001):
+    grads = compute_gradient(params, X, y, hidden_state)
+    # Fixed: Update params tuple with corresponding gradient tuple
+    new_params = tuple(
+        p - learning_rate * g for p, g in zip(params, grads)
+    )
+    return new_params
+"""
+
+# Example_id = "m6"
+"""
+Error Code
+npimg = img.numpy()
+
+Error
+AttributeError: 'jaxlib.xla_extension.ArrayImpl' object has no attribute 'numpy'
+
+Fix Guide
+Replace the line npimg = img.numpy() in the imshow function with npimg = np.asarray(img) to convert the JAX array to a NumPy array correctly.
+
+Fixed_Code
+npimg = np.asarray(img)
+"""
+
+"""Error Code
+plt.imshow(np.transpose(npimg, (1, 2, 0)))
+
+Error
+TypeError: Invalid shape (32, 3, 32) for image data
+
+Fix Guide
+Remove the line since image is already in (height, width, channels) shape
+"""
+
+## Example_id = "m7"
+"""
+Error Code
+return -jnp.mean(jnp.sum(y * jax.nn.log_softmax(logits), axis=1))
+
+Error
+ValueError: Incompatible shapes for broadcasting: shapes=[(64,), (64, 10)]
+
+Fix Guide
+Convert the integer labels y to one-hot encoded labels using jax.nn.one_hot in the loss_fn to ensure y has shape (64, 10) before computing the cross-entropy loss
+
+Fixed_Code
+# Fixed: Convert integer labels to one-hot encoded labels
+    y_one_hot = jax.nn.one_hot(y, num_classes=10)  # Shape: (batch_size, 10)
+    return -jnp.mean(jnp.sum(y_one_hot * jax.nn.log_softmax(logits), axis=1))
+
+# Testing loop
+X_test = jnp.array(np.random.randn(100, 28*28))  # Fixed: Convert to JAX array
+y_test = jnp.array(np.random.randint(0, 10, size=(100,)))  # Fixed: Convert to JAX array
+"""
+
+# Example_id = "m8"
+Error Code
+x = nn.ConvTranspose(32, kernel_size=(3, 3), strides=(2, 2), padding='SAME', output_padding=(1, 1))(x)
+        x = nn.relu(x)
+        x = nn.ConvTranspose(1, kernel_size=(3, 3), strides=(2, 2), padding='SAME', output_padding=(1, 1))(x)
+Error
+TypeError: ConvTranspose.__init__() got an unexpected keyword argument 'output_padding'
+Fix Guide
+Removed output_padding, adjusted parameters to upsample correctly
+Fixed Code 
+        x = nn.ConvTranspose(32, kernel_size=(3, 3), strides=(2, 2), padding='SAME')(x)
+        x = nn.relu(x)
+        x = nn.ConvTranspose(1, kernel_size=(3, 3), strides=(2, 2), padding='SAME')(x)
+        return nn.sigmoid(x)  # To keep pixel values between 0 and 1
+"""
+
+"""Error Code
+reconstructed = model.apply({'params': params}, images)
+Error
+ApplyScopeInvalidVariablesStructureError: Expect the `variables` (first argument) passed to apply() to be a dict with the structure {"params": ...}, but got a dict with an extra params layer, i.e.  {"params": {"params": ... } }. You should instead pass in your dict's ["params"]. (https://flax.readthedocs.io/en/latest/api_reference/flax.errors.html#flax.errors.ApplyScopeInvalidVariablesStructureError)
+Fix Guide
+Return updated params directly
+
+Fixed_Code
+def loss_fn(params, model, images, targets):
+    # Fixed: Use params directly, as it is the inner parameter dictionary
+    reconstructed = model.apply({'params': params}, images)
+    return jnp.mean((reconstructed - targets) ** 2)
+
+# Optimizer initialization
+def create_optimizer(params):
+    tx = optax.adam(learning_rate=0.001)
+    # Fixed: Use params directly for optimizer initialization
+    return tx.init(params)
+
+# Training step
+def train_step(params, images, targets, model, optimizer):
+    # Fixed: Use params directly for gradient computation
+    grads = jax.grad(loss_fn)(params, model, images, targets)
+    updates, optimizer = optax.adam(learning_rate=0.001).update(grads, optimizer)
+    new_params = optax.apply_updates(params, updates)
+    return new_params, optimizer
+"""
+
+## Example_id = "h6"
+"""Error Code
+self.lstm = nn.LSTMCell()
+Error
+TypeError: LSTMCell.__init__() missing 1 required positional argument: 'features'
+
+Fix Guide
+Add features parameter to LSTMCell, set to hidden_size
+Initialize LSTM hidden and cell states
+Use scan to process sequence through LSTMCell
+Process sequence with scan
+Ensure X_test matches training input shape (batch_size, seq_length)
+
+Fixed_Code
+self.lstm = nn.LSTMCell(features=self.hidden_size)
+        self.fc = nn.Dense(self.vocab_size)
+"""
+
+"""
+Error Code
+params, loss, optimizer_state = update(params, model, X_train, y_train, optimizer, optimizer_state)
+
+Error
+TypeError: Error interpreting argument to <function update at 0x7a2554a69940> as an abstract array. The problematic value is of type <class '__main__.LanguageModel'> and was passed to the function at path model.
+This typically means that a jit-wrapped function was called with a non-array argument, and this argument was not marked as static using the static_argnums or static_argnames parameters of jax.jit.
+
+Fixed Code
+@jax.jit(static_argnums=(1,))
+def update(params, model, inputs, targets, optimizer, optimizer_state):
+"""
+
+"""Error Code
+@jax.jit(static_argnums=(1,))
+
+Error
+TypeError: jit() missing 1 required positional argument: 'fun'
+
+Fix Guide
+Mismatch JAX version
+
+Fixed Code
+NO FIX
+"""
+
+## Example_id = "h10"
+
+"""Error Code
+output = model.apply({'params': params}, X)
+
+Error
+ApplyScopeInvalidVariablesStructureError: Expect the `variables` (first argument) passed to apply() to be a dict with the structure {"params": ...}, but got a dict with an extra params layer, i.e.  {"params": {"params": ... } }. You should instead pass in your dict's ["params"]. (https://flax.readthedocs.io/en/latest/api_reference/flax.errors.html#flax.errors.ApplyScopeInvalidVariablesStructureError)
+
+Fix Guide
+Modify the loss_fn, grad_cam, and forward pass where model.apply is called to use params["params"].
+Fixed Code
+def compute_loss(params, X, y):
+        # FIX: Use params["params"] instead of params
+        preds = model.apply({'params': params["params"]}, X)
+
+"""
+"""
+Error Code
+heatmap = heatmap / jnp.max(heatmap)  # Normalize the heatmap
+
+Error
+AttributeError: 'dict' object has no attribute 'mean'
+Fix Guide
+Modify the grad_cam function to extract the gradient of the convolutional layer’s parameters
+and update the heatmap computation to operate on this array
+Fixed Code
+grads = grad(compute_loss)(params, X, target_class)
+    # Extract the gradient for the convolutional layer's kernel
+    conv_grad = grads["params"]["Conv_0"]["kernel"]  # Shape: (3, 3, 3, 64)
+    # Average over input channels and kernel size to get feature map importance
+    feature_weights = jnp.mean(conv_grad, axis=(0, 1, 2))  # Shape: (64,)
+    # Apply weights to the feature maps (requires forward pass to get conv output)
+    def get_conv_output(params, X):
+        x = model.apply({'params': params["params"]}, X, mutable=False)
+        return x  # In this case, we need the intermediate conv output
+    conv_output = model.apply({'params': params["params"]}, X)  # Shape: (1, 224, 224, 64)
+    # Compute weighted sum of feature maps
+    cam = jnp.einsum('...ijk,k->...ij', conv_output, feature_weights)
+    return cam
+"""
+"""Error Code
+grads = grad_cam(model, params, X, y)
+
+Error
+ValueError: Size of label 'k' for operand 1 (10) does not match previous terms (64).
+
+Fix Guide
+NO FIX
+Fixed Code
+NO FIX
+"""
