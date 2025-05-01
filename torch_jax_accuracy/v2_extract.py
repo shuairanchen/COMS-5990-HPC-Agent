@@ -3,9 +3,36 @@ load_dotenv()
 import os
 from huggingface_hub import login
 from pathlib import Path
+import os
+import boto3
+from smart_open import open
 
-fp_token='../../HF_TOKEN.txt'
-f1=open(fp_token,'r')
+
+
+def download_contents(blob_id, src_encoding):
+    s3_url = f"s3://softwareheritage/content/{blob_id}"
+
+    with open(s3_url, "rb", compression=".gz", transport_params={"client": s3}) as fin:
+        content = fin.read().decode(src_encoding)
+
+    return {"content": content}
+
+fp_hf_token='../../HF_TOKEN.txt'
+fp_aws_token='../../aws_info.txt'
+
+f1=open(fp_aws_token,'r')
+arr_content=f1.read().strip().split('\n')
+f1.close()
+os.environ["AWS_ACCESS_KEY_ID"]=arr_content[0]
+os.environ["AWS_SECRET_ACCESS_KEY"]=arr_content[1]
+
+session = boto3.Session(
+    aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+    aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
+s3 = session.client("s3")
+
+
+f1=open(fp_hf_token,'r')
 str_hf_token=f1.read()
 f1.close()
 os.environ['HF_TOKEN']=str_hf_token
@@ -14,6 +41,7 @@ fop_output='../../torch_jax_data'
 Path(fop_output).mkdir(exist_ok=True)
 num_example=100
 
+
 # Then load dataset
 from datasets import load_dataset
 # ds = load_dataset("bigcode/the-stack-v2", split="train")
@@ -21,8 +49,12 @@ from datasets import load_dataset
 # ds = load_dataset("bigcode/the-stack-v2", split="train")
 
 # specific language (e.g. Dockerfiles)
-ds = load_dataset("bigcode/the-stack-v2", "Python",streaming=True, split="train")
-pytorch_ds_sample = ds.filter(lambda x: "import torch" in x["content"]).shuffle().select(range(num_example))
+# Load streamed dataset
+ds = load_dataset("bigcode/the-stack-v2", "Python", streaming=True, split="train")
+
+# Filter and sample
+filtered_ds = ds.filter(lambda x: "import torch" in x["content"])
+pytorch_ds_sample = filtered_ds.shuffle(seed=42).take(num_example)  # `take()` for streaming datasets
 
 pytorch_examples = []
 for sample in iter(pytorch_ds_sample):
