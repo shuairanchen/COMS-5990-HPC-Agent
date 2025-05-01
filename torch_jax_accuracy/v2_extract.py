@@ -51,6 +51,7 @@ from datasets import load_dataset
 # specific language (e.g. Dockerfiles)
 # Load streamed dataset
 ds = load_dataset("bigcode/the-stack-v2", "Python", streaming=True, split="train")
+ds = ds.map(lambda row: download_contents(row["blob_id"], row["src_encoding"]))
 
 # Filter and sample
 filtered_ds = ds.filter(lambda x: "import torch" in x["content"])
