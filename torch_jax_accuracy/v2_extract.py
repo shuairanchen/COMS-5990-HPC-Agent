@@ -21,8 +21,8 @@ from datasets import load_dataset
 # ds = load_dataset("bigcode/the-stack-v2", split="train")
 
 # specific language (e.g. Dockerfiles)
-ds = load_dataset("bigcode/the-stack-v2", "Python", split="train")
-pytorch_ds_sample = ds.filter(lambda x: "import torch" in x["content"]).shuffle()[:num_example]
+ds = load_dataset("bigcode/the-stack-v2", "Python",streaming=True, split="train")
+pytorch_ds_sample = ds.filter(lambda x: "import torch" in x["content"]).shuffle().select(range(num_example))
 
 pytorch_examples = []
 for sample in iter(pytorch_ds_sample):
