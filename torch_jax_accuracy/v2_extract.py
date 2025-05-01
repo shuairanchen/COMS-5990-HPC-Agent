@@ -2,7 +2,17 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 from huggingface_hub import login
+from pathlib import Path
+
+fp_token='../../HF_TOKEN.txt'
+f1=open(fp_token,'r')
+str_hf_token=f1.read()
+f1.close()
+os.environ['HF_TOKEN']=str_hf_token
 login(token= os.getenv('HF_TOKEN'))  # Get token from Hugging Face settings
+fop_output='../../torch_jax_data'
+Path(fop_output).mkdir(exist_ok=True)
+num_example=100
 
 # Then load dataset
 from datasets import load_dataset
@@ -12,17 +22,17 @@ from datasets import load_dataset
 
 # specific language (e.g. Dockerfiles)
 ds = load_dataset("bigcode/the-stack-v2", "Python", split="train")
-pytorch_ds = ds.filter(lambda x: "import torch" in x["content"])
+pytorch_ds_sample = ds.filter(lambda x: "import torch" in x["content"]).shuffle()[:num_example]
 
 pytorch_examples = []
-for sample in iter(pytorch_ds):
+for sample in iter(pytorch_ds_sample):
     if "import torch" in sample["content"]:
         pytorch_examples.append(sample["content"])
-        if len(pytorch_examples) >= 100:
-            break
+        # if len(pytorch_examples) >= 100:
+        #     break
 
 import json
-with open("pytorch_100_examples.jsonl", "w") as f:
+with open(fop_output+"pytorch_100_examples.jsonl", "w") as f:
     for code in pytorch_examples:
         f.write(json.dumps({"content": code}) + "\n")
 
