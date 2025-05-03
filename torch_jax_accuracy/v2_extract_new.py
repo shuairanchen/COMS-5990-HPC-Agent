@@ -22,7 +22,7 @@ os.environ['HF_TOKEN']=str_hf_token
 login(token=os.environ["HF_TOKEN"])
 # print(os.environ["HF_TOKEN"])
 
-fop_sample='large_test_datasets_codeparrot/'
+fop_sample='large_test_datasets_codeparrot_v1/'
 Path(fop_sample).mkdir(exist_ok=True)
 max_file_size = 100_000  # 100KB limit
 list_sizes=[100,200,500,1000,2000]
