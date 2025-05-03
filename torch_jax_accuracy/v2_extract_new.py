@@ -30,7 +30,7 @@ list_sizes=[100,200,500,1000,2000]
 for ind_size in range(0,len(list_sizes)):
     # Collect 100 PyTorch examples
     ds = load_dataset("codeparrot/github-code", "Python-all", streaming=True, split="train",
-                      trust_remote_code=True).shuffle()
+                      trust_remote_code=True).shuffle(seed=42)
 
     num_sample=list_sizes[ind_size]
     pytorch_examples = []
@@ -40,14 +40,16 @@ for ind_size in range(0,len(list_sizes)):
         if ("import torch" in code and
             any(pattern in code for pattern in ["torch.nn", "torch.tensor", "torch.optim", "torch.utils.data"])):
             if len(code.encode("utf-8")) <= max_file_size:
-                pytorch_examples.append(code)
+                pytorch_examples.append(sample)
                 if len(pytorch_examples) >= num_sample:
                     break
 
     # Save to JSONL
-    with open(fop_sample+"samples_{}.jsonl".format(num_sample), "w") as f:
-        for code in pytorch_examples:
-            f.write(json.dumps({"code": code}) + "\n")
+    # with open(fop_sample+"samples_{}.jsonl".format(num_sample), "w") as f:
+    #     for code in pytorch_examples:
+    #         f.write(json.dumps({"code": code}) + "\n")
+    with open(fop_sample+"samples_{}.jsonl", "w") as f:
+        json.dump(pytorch_examples, f, indent=2)
 
     # Extract to .py files
     output_dir = fop_sample+ "samples_{}/".format(num_sample)
