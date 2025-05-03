@@ -3,32 +3,58 @@ import os
 from huggingface_hub import login
 from datasets import load_dataset
 
-login(token=os.getenv("HF_TOKEN"))
-ds = load_dataset("codeparrot/github-code", "Python-all", streaming=True, split="train")
+fp_hf_token='../../HF_TOKEN.txt'
+fp_aws_token='../../aws_info.txt'
 
-# Collect 100 PyTorch examples
-pytorch_examples = []
+f1=open(fp_hf_token,'r')
+str_hf_token=f1.read()
+f1.close()
+
+f1=open(fp_aws_token,'r')
+arr_content=f1.read().strip().split('\n')
+f1.close()
+
+
+os.environ['HF_TOKEN']=str_hf_token
+
+
+login(token=os.environ["HF_TOKEN"])
+# print(os.environ["HF_TOKEN"])
+
+fop_sample='large_test_datasets_codeparrot/'
+
 max_file_size = 100_000  # 100KB limit
-for sample in iter(ds):
-    code = sample["code"]  # Field for code
-    if ("import torch" in code and 
-        any(pattern in code for pattern in ["torch.nn", "torch.tensor", "torch.optim", "torch.utils.data"])):
-        if len(code.encode("utf-8")) <= max_file_size:
-            pytorch_examples.append(code)
-            if len(pytorch_examples) >= 100:
-                break
+list_sizes=[100,200,500,1000,2000]
 
-# Save to JSONL
-with open("pytorch_100_examples.jsonl", "w") as f:
-    for code in pytorch_examples:
-        f.write(json.dumps({"code": code}) + "\n")
+for ind_size in range(0,len(list_sizes)):
+    # Collect 100 PyTorch examples
+    ds = load_dataset("codeparrot/github-code", "Python-all", streaming=True, split="train",
+                      trust_remote_code=True).shuffle()
 
-# Extract to .py files
-output_dir = "pytorch_files"
-os.makedirs(output_dir, exist_ok=True)
-for i, code in enumerate(pytorch_examples):
-    with open(f"{output_dir}/example_{i+1}.py", "w") as py_file:
-        py_file.write(code)
+    num_sample=list_sizes[ind_size]
+    pytorch_examples = []
+    print('begin {}'.format(num_sample))
+    for sample in iter(ds):
+        code = sample["code"]  # Field for code
+        if ("import torch" in code and
+            any(pattern in code for pattern in ["torch.nn", "torch.tensor", "torch.optim", "torch.utils.data"])):
+            if len(code.encode("utf-8")) <= max_file_size:
+                pytorch_examples.append(code)
+                if len(pytorch_examples) >= num_sample:
+                    break
+
+    # Save to JSONL
+    with open(fop_sample+"samples_{}.jsonl".format(num_sample), "w") as f:
+        for code in pytorch_examples:
+            f.write(json.dumps({"code": code}) + "\n")
+
+    # Extract to .py files
+    output_dir = fop_sample+ "samples_{}/".format(num_sample)
+    os.makedirs(output_dir, exist_ok=True)
+    for i, code in enumerate(pytorch_examples):
+        with open(f"{output_dir}/{i+1}.py", "w") as py_file:
+            py_file.write(code)
+    print('end {}'.format(num_sample))
 
 # import json
 # import os
