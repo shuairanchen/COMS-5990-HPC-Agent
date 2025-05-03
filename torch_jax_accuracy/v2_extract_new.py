@@ -55,9 +55,9 @@ for ind_size in range(0,len(list_sizes)):
     output_dir = fop_sample+ "samples_{}/".format(num_sample)
     Path(output_dir).mkdir(exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
-    for i, code in enumerate(pytorch_examples):
+    for i, sample in enumerate(pytorch_examples):
         with open(f"{output_dir}/{i+1}.py", "w") as py_file:
-            py_file.write(code)
+            py_file.write(sample['code'])
     print('end {}'.format(num_sample))
 
 # import json
