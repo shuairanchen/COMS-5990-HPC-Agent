@@ -2,6 +2,7 @@ import json
 import os
 from huggingface_hub import login
 from datasets import load_dataset
+from pathlib import Path
 
 fp_hf_token='../../HF_TOKEN.txt'
 fp_aws_token='../../aws_info.txt'
@@ -22,7 +23,7 @@ login(token=os.environ["HF_TOKEN"])
 # print(os.environ["HF_TOKEN"])
 
 fop_sample='large_test_datasets_codeparrot/'
-
+Path(fop_sample).mkdir(exist_ok=True)
 max_file_size = 100_000  # 100KB limit
 list_sizes=[100,200,500,1000,2000]
 
@@ -50,6 +51,7 @@ for ind_size in range(0,len(list_sizes)):
 
     # Extract to .py files
     output_dir = fop_sample+ "samples_{}/".format(num_sample)
+    Path(output_dir).mkdir(exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     for i, code in enumerate(pytorch_examples):
         with open(f"{output_dir}/{i+1}.py", "w") as py_file:
