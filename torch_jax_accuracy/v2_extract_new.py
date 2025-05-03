@@ -48,7 +48,7 @@ for ind_size in range(0,len(list_sizes)):
     # with open(fop_sample+"samples_{}.jsonl".format(num_sample), "w") as f:
     #     for code in pytorch_examples:
     #         f.write(json.dumps({"code": code}) + "\n")
-    with open(fop_sample+"samples_{}.jsonl", "w") as f:
+    with open(fop_sample+"samples_{}.jsonl".format(num_sample), "w") as f:
         json.dump(pytorch_examples, f, indent=2)
 
     # Extract to .py files
