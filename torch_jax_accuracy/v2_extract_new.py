@@ -25,7 +25,8 @@ login(token=os.environ["HF_TOKEN"])
 fop_sample='large_test_datasets_codeparrot_v1/'
 Path(fop_sample).mkdir(exist_ok=True)
 max_file_size = 100_000  # 100KB limit
-list_sizes=[100,200,500,1000,2000]
+# list_sizes=[100,200,500,1000,2000]
+list_sizes=[50]
 
 for ind_size in range(0,len(list_sizes)):
     # Collect 100 PyTorch examples
