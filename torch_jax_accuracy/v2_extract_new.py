@@ -3,9 +3,27 @@ import os
 from huggingface_hub import login
 from datasets import load_dataset
 from pathlib import Path
+import tiktoken
+
+
+def count_tokens_o3(prompt: str, model: str = "openai/o3-mini") -> int:
+    """
+    Count the number of tokens in a prompt for a given OpenAI model (default: o3-mini).
+    """
+    try:
+        # Load tokenizer for the given model
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        # Fallback to a general tokenizer if specific one isn't found
+        encoding = tiktoken.get_encoding("cl100k_base")
+
+    # Encode and count tokens
+    tokens = encoding.encode(prompt)
+    return len(tokens)
 
 fp_hf_token='../../HF_TOKEN.txt'
 fp_aws_token='../../aws_info.txt'
+max_length_count=2048
 
 f1=open(fp_hf_token,'r')
 str_hf_token=f1.read()
@@ -26,7 +44,7 @@ fop_sample='large_test_datasets_codeparrot_v1/'
 Path(fop_sample).mkdir(exist_ok=True)
 max_file_size = 100_000  # 100KB limit
 # list_sizes=[100,200,500,1000,2000]
-list_sizes=[50]
+list_sizes=[50,100]
 
 for ind_size in range(0,len(list_sizes)):
     # Collect 100 PyTorch examples
@@ -40,7 +58,7 @@ for ind_size in range(0,len(list_sizes)):
         code = sample["code"]  # Field for code
         if ("import torch" in code and
             any(pattern in code for pattern in ["torch.nn", "torch.tensor", "torch.optim", "torch.utils.data"])):
-            if len(code.encode("utf-8")) <= max_file_size:
+            if len(code.encode("utf-8")) <= max_file_size and count_tokens_o3(code)<=max_length_count:
                 pytorch_examples.append(sample)
                 if len(pytorch_examples) >= num_sample:
                     break

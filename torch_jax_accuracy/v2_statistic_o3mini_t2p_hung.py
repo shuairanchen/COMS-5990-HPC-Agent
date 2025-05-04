@@ -54,7 +54,7 @@ api_key = os.environ.get("OPENAI_API_KEY")  # Or replace with "YOUR_OPENAI_API_K
 client = OpenAI(api_key=api_key)
 
 # Directories
-num_samples=2000
+num_samples=100
 input_dir = "large_test_datasets_codeparrot_v1/samples_{}/".format(num_samples)  # Path to the directory containing PyTorch files
 output_dir = "large_test_datasets_codeparrot_translation_org/samples_{}/".format(num_samples)
 os.makedirs(output_dir, exist_ok=True)

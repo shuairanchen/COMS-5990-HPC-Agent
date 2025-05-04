@@ -1,6 +1,6 @@
 You are an expert in programming language translation from Pytorch to JAX. In this task, I will give you two inputs:
 1) Pytorch source code.
-A JSON file that contains a dataset of common errors in torch-to-JAX translation by Weak LLM 4o-mini. Each data point contains the following fields:
+2) A JSON file that contains a dataset of common errors in torch-to-JAX translation by Weak LLM 4o-mini. Each data point contains the following fields:
 - Example_id: ID of the source code.
 - Input_Code: Source code in Pytorch.
 - LLM_weak_output: JAX translated code of Input_Code using a weak LLM (4o-mini).
@@ -11,7 +11,7 @@ A JSON file that contains a dataset of common errors in torch-to-JAX translation
         -"Fix_info": the textual description of how to fix the error code.
         -"Fixed_Code": The fixed code corresponding to the “Error_code” part.
 
-The data.csv file thich stored possible input when running some examples in the JSON file.
+3) The data.csv file thich stored possible input when running some examples in the JSON file.
 
 Your task is to reason and get the output JAX code from these above inputs. Please note that you can learn the process of error fixing in Torch-to-JAX translation in 2) JSON file.
 
