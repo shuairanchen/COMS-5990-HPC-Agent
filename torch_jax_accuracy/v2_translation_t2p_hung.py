@@ -94,9 +94,9 @@ for i in range(1, 101):  # example_1.py to example_100.py
                 response = client.chat.completions.create(
                     model="openai/o3-mini",  # Or "gpt-4" if available
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=8000  # Adjust based on code length
+                    max_tokens=2048  # Adjust based on code length
                 )
-                print('{} {}'.format(type(response),response))
+                # print('{} {}'.format(type(response),response))
                 # jax_code = response.choices[0].message.content.strip()
                 jax_code = response.choices[0].message.content.strip()
                 if jax_code!='':
@@ -108,12 +108,14 @@ for i in range(1, 101):  # example_1.py to example_100.py
                     with open(output_file, "w") as f:
                         f.write(jax_code)
                     is_run_ok = True
-                    break
+                    # break
                     logging.info(f"Successfully translated {input_file} to {output_file}")
             except Exception as e:
                 traceback.print_exc()
             print('handle {} {}'.format(i, is_run_ok))
-            time.sleep(1)
+            time.sleep(0.5)
+            if is_run_ok:
+                break
 
     except Exception as e:
         traceback.print_exc()
