@@ -64,7 +64,7 @@ client = OpenAI(
   api_key=os.getenv("OPENROUTER_API_KEY"),
 )
 
-test_mode=True
+test_mode=False
 
 # Process each file
 for i in range(1, 101):  # example_1.py to example_100.py
