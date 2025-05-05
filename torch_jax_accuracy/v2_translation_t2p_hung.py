@@ -11,7 +11,7 @@ load_dotenv()
 
 # Set up logging
 logging.basicConfig(filename="translation.log", level=logging.INFO)
-max_run=5
+max_run=10
 
 
 fp_hf_token='../../HF_TOKEN.txt'
@@ -90,6 +90,10 @@ for i in range(1, 101):  # example_1.py to example_100.py
             index_run += 1
             # Prepare prompt
             try:
+                if os.path.exists(output_file):
+                    print('file {} exists'.format(i))
+                    is_run_ok=True
+                    break
                 # Call OpenAI API
                 response = client.chat.completions.create(
                     model="openai/o3-mini",  # Or "gpt-4" if available
@@ -113,7 +117,7 @@ for i in range(1, 101):  # example_1.py to example_100.py
             except Exception as e:
                 traceback.print_exc()
             print('handle {} {}'.format(i, is_run_ok))
-            time.sleep(0.5)
+            # time.sleep(0.5)
             if is_run_ok:
                 break
 

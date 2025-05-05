@@ -92,7 +92,7 @@ for i in range(1, 101):  # example_1.py to example_100.py
             try:
                 # Call OpenAI API
                 response = client.chat.completions.create(
-                    model="openai/4o-mini",  # Or "gpt-4" if available
+                    model="openai/gpt-4o-mini",  # Or "gpt-4" if available
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=2048  # Adjust based on code length
                 )
