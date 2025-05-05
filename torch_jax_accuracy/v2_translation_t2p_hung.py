@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import traceback
 
 from openai import OpenAI
@@ -10,6 +11,7 @@ load_dotenv()
 
 # Set up logging
 logging.basicConfig(filename="translation.log", level=logging.INFO)
+max_run=5
 
 
 fp_hf_token='../../HF_TOKEN.txt'
@@ -40,8 +42,8 @@ client = OpenAI(api_key=api_key)
 
 # Directories
 
-input_dir = "large_test_datasets_codeparrot_v1/samples_50/"  # Path to the directory containing PyTorch files
-output_dir = "large_test_datasets_codeparrot_translation_org/samples_50/"
+input_dir = "large_test_datasets_codeparrot_v1/samples_100/"  # Path to the directory containing PyTorch files
+output_dir = "large_test_datasets_codeparrot_translation_o3-mini/samples_100/"
 os.makedirs(output_dir, exist_ok=True)
 
 # Translation prompt
@@ -81,26 +83,37 @@ for i in range(1, 101):  # example_1.py to example_100.py
         
         # Prepare prompt
         prompt = prompt_template.format(code=pytorch_code)
-        
-        # Call OpenAI API
-        response = client.chat.completions.create(
-            model="openai/o3-mini",  # Or "gpt-4" if available
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=8000  # Adjust based on code length
-        )
-        print('{} {}'.format(type(response),response))
-        # jax_code = response.choices[0].message.content.strip()
-        jax_code = response.choices[0].message.content.strip()
-        
-        # Extract code from response
-        if jax_code.startswith("```python"):
-            jax_code = jax_code.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        
-        # Save JAX code
-        with open(output_file, "w") as f:
-            f.write(jax_code)
-        
-        logging.info(f"Successfully translated {input_file} to {output_file}")
+
+        index_run = 0
+        is_run_ok = False
+        while (index_run <= max_run):
+            index_run += 1
+            # Prepare prompt
+            try:
+                # Call OpenAI API
+                response = client.chat.completions.create(
+                    model="openai/o3-mini",  # Or "gpt-4" if available
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=8000  # Adjust based on code length
+                )
+                print('{} {}'.format(type(response),response))
+                # jax_code = response.choices[0].message.content.strip()
+                jax_code = response.choices[0].message.content.strip()
+                if jax_code!='':
+                    # Extract code from response
+                    if jax_code.startswith("```python"):
+                        jax_code = jax_code.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+                    # Save JAX code
+                    with open(output_file, "w") as f:
+                        f.write(jax_code)
+                    is_run_ok = True
+                    break
+                    logging.info(f"Successfully translated {input_file} to {output_file}")
+            except Exception as e:
+                traceback.print_exc()
+            print('handle {} {}'.format(i, is_run_ok))
+            time.sleep(1)
 
     except Exception as e:
         traceback.print_exc()
