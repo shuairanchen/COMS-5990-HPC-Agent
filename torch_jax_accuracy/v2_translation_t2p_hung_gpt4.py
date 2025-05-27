@@ -43,7 +43,7 @@ client = OpenAI(api_key=api_key)
 # Directories
 
 input_dir = "large_test_datasets_codeparrot_v1/samples_100/"  # Path to the directory containing PyTorch files
-output_dir = "large_test_datasets_codeparrot_translation_o3-mini/samples_100/"
+output_dir = "large_test_datasets_codeparrot_translation_gpt-4o/samples_100/"
 os.makedirs(output_dir, exist_ok=True)
 
 # Translation prompt
@@ -97,9 +97,9 @@ for i in range(1, 101):  # example_1.py to example_100.py
                     print('file {} not exists'.format(i))
                 # Call OpenAI API
                 response = client.chat.completions.create(
-                    model="openai/o3-mini",  # Or "gpt-4" if available
+                    model="openai/gpt-4o",  # Or "gpt-4" if available
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=4096  # Adjust based on code length
+                    max_tokens=2048  # Adjust based on code length
                 )
                 # print('{} {}'.format(type(response),response))
                 # jax_code = response.choices[0].message.content.strip()

@@ -1,0 +1,1 @@
+<class 'openai.types.chat.chat_completion.ChatCompletion'> ChatCompletion(id=None, choices=None, created=None, model=None, object=None, service_tier=None, system_fingerprint=None, usage=None, error={'message': 'Internal
