@@ -59,11 +59,11 @@ for name_file in files:
             result_a = score = evaluate_translation(input_source_code="'''\n" + input_source + "\n'''",
                                                     output_translated_code="'''\n" + prediction_a + "\n'''",
                                                     reference="'''\n" + reference + "\n'''",
-                                                    task=task, aspect=aspect, model=selected_model)
+                                                    task=task, aspect=aspect, model=selected_model,cot=True)[0]
             result_b = evaluate_translation(input_source_code="'''\n" + input_source + "\n'''",
                                             output_translated_code="'''\n" + prediction_b + "\n'''",
                                             reference="'''\n" + reference + "\n'''",
-                                            task=task, aspect=aspect, model=selected_model)
+                                            task=task, aspect=aspect, model=selected_model,cot=True)[0]
             int(result_a)
             int(result_b)
             is_success=True
@@ -71,7 +71,7 @@ for name_file in files:
             traceback.print_exc()
         index_attempt+=1
         if (not is_success):
-            time.sleep(30)
+            time.sleep(60)
         print('{} {} {} {}'.format(name_file,max_attempt,result_a,result_b))
 
 
